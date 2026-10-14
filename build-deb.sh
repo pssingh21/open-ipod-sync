@@ -169,18 +169,11 @@ case "$cmd" in
   recover-check) ensure_ro_mount; exec python3 "$APP" --mount "$IPOD_SYNC_MOUNT" --recover-check "$@" ;;
   recover) ensure_ro_mount; exec python3 "$APP" --mount "$IPOD_SYNC_MOUNT" --recover "$@" ;;
   doctor)
-    echo "ipod-sync 0.2.0-alpha.5 doctor"; echo "source: $IPOD_SYNC_SOURCE"; echo "mount:  $IPOD_SYNC_MOUNT"
-    fail=0
-    for x in python3 ifuse fusermount mountpoint findmnt idevice_id idevicepair ffmpeg ffprobe gcc pkg-config; do
-      command -v "$x" >/dev/null && echo "  $x: PASS" || { echo "  $x: MISSING"; fail=1; }
-    done
-    for p in /usr/lib/ipod-sync/native/sync-envelope /usr/lib/ipod-sync/native/sign-cdb.c \
-             /usr/lib/ipod-sync/native/rijndael.c /usr/lib/ipod-sync/ipodctl/cdb.py \
-             /usr/lib/ipod-sync/vendor/libgpod/include/gpod-1.0/gpod/itdb.h; do
-      [[ -e "$p" ]] && echo "  $(basename "$p"): PASS" || { echo "  $p: MISSING"; fail=1; }
-    done
-    compgen -G '/usr/lib/ipod-sync/vendor/libgpod/lib/libgpod.so*' >/dev/null && echo "  patched libgpod: PASS" || { echo "  patched libgpod: MISSING"; fail=1; }
-    exit "$fail" ;;
+    exec python3 "$APP" \
+      --doctor \
+      --source "$IPOD_SYNC_SOURCE" \
+      --mount "$IPOD_SYNC_MOUNT" \
+      "$@" ;;
   raw) exec python3 "$APP" "$@" ;;
   *)
     cat >&2 <<'USAGE'
