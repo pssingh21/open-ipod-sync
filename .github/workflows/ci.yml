@@ -168,3 +168,41 @@ jobs:
           fi
 
           ./tools/audit-deb.sh "${packages[0]}"
+      - name: Prepare audited CI artifact
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one audited Debian package" >&2
+            exit 1
+          fi
+
+          mkdir -p ci-artifact
+
+          cp "${packages[0]}" ci-artifact/
+
+          (
+            cd ci-artifact
+            sha256sum ./*.deb > SHA256SUMS
+          )
+
+          echo "===== CI ARTIFACT ====="
+          cat ci-artifact/SHA256SUMS
+
+      - name: Upload audited Debian package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipod-sync-debian11-amd64-${{ github.sha }}
+          path: |
+            ci-artifact/*.deb
+            ci-artifact/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
