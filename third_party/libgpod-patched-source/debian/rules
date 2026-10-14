@@ -1,0 +1,130 @@
+#!/usr/bin/make -f
+
+export MONO_DISABLE_SHM = 1
+
+DH = dh $(1)
+
+SONAME=4
+VERSION = 0.7.94
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1 -Wl,--as-needed
+confflags += --without-hal --enable-udev --disable-silent-rules
+
+# targets are appended to $(BASE) to get the build directory
+targets_arch = gtk
+targets_indep = doc
+
+ifneq (,$(findstring -cil,$(shell dh_listpackages)))
+targets_arch += mono
+DH += --with=cli
+endif
+
+BASE = build
+
+
+# configure stuff
+$(BASE)/gtk/config.status:
+	dh_auto_configure -B$(dir $@) -- \
+		--with-python=no \
+		--with-mono=no \
+		--disable-gtk-doc \
+		$(confflags)
+
+$(BASE)/mono/config.status:
+	dh_auto_configure -B$(dir $@) -- \
+		--with-python=no \
+		--with-mono=yes \
+		--disable-gtk-doc \
+		--enable-gdk-pixbuf \
+		--prefix=/usr \
+		--libdir=/usr/lib \
+		$(confflags) \
+		MCS=/usr/bin/mono-csc
+
+$(BASE)/doc/config.status:
+	dh_auto_configure -B$(dir $@) -- \
+		--with-python=no \
+		--with-mono=no \
+		--enable-gtk-doc \
+		$(confflags)
+
+
+# build stuff
+$(BASE)/%/build-stamp: $(BASE)/%/config.status
+	dh_auto_build -B$(dir $@)
+	touch $@
+
+
+# install stuff
+$(BASE)/gtk/install-stamp: $(BASE)/gtk/build-stamp
+	dh_auto_install -B$(dir $@)
+	install \
+		build/gtk/tools/ipod-time-sync \
+		debian/tmp/usr/bin/ipod-time-sync
+	touch $@
+
+$(BASE)/mono/install-stamp: $(BASE)/mono/build-stamp
+	dh_auto_install -B$(dir $@)/bindings/mono
+	touch $@
+
+$(BASE)/doc/install-stamp: $(BASE)/doc/build-stamp
+	dh_auto_install -B$(dir $@)/docs
+	touch $@
+
+
+# hook in the configure, build, install and clean stages
+override_dh_auto_configure-arch: $(foreach i, $(targets_arch), $(BASE)/$(i)/config.status)
+override_dh_auto_configure-indep: $(foreach i, $(targets_indep), $(BASE)/$(i)/config.status)
+
+override_dh_auto_build-arch: $(foreach i, $(targets_arch), $(BASE)/$(i)/build-stamp)
+override_dh_auto_build-indep: $(foreach i, $(targets_indep), $(BASE)/$(i)/build-stamp)
+
+override_dh_auto_install-arch: $(foreach i, $(targets_arch), $(BASE)/$(i)/install-stamp)
+	$(foreach i, \
+		$(wildcard debian/tmp*/usr/bin/*) \
+		$(wildcard debian/tmp/usr/lib/*/udev/*-info) \
+		$(wildcard debian/tmp/usr/lib/*/libgpod.so.$(SONAME)), \
+		chrpath -d $(i);)
+
+	find debian/tmp* -name '*.la' -delete
+
+override_dh_auto_install-indep: $(foreach i, $(targets_indep), $(BASE)/$(i)/install-stamp)
+
+override_dh_install:
+	dh_install
+	# Needed for syncing with ubuntu: launchpad needs .pot files
+	cd po; intltool-update --pot
+
+# don't install things to /usr/share/doc/libgpod-dev, as they're
+# symlinked
+override_dh_installchangelogs:
+	dh_installchangelogs -Nlibgpod-dev
+override_dh_installdocs:
+	dh_installdocs -plibgpod-doc --doc-main-package=libgpod-doc
+	dh_installdocs -plibgpod-dev --link-doc=libgpod4
+	dh_installdocs --remaining-packages
+override_dh_installexamples:
+	dh_installexamples -plibgpod-doc --doc-main-package=libgpod-doc
+	dh_installexamples --remaining-packages
+
+# cleaning rules
+clean:
+	$(call DH, $@)
+	rm -rf debian/tmp-*
+
+override_dh_autoreconf:
+	gtkdocize --copy
+	dh_autoreconf
+
+override_dh_auto_clean:
+	rm -f gtk-doc.make m4/gtk-doc.m4 po/libgpod.pot
+	rm -rf build/
+
+override_dh_makeshlibs-arch:
+	dpkg-gensymbols -c4 -Pdebian/libgpod$(SONAME) -plibgpod$(SONAME)
+	dh_makeshlibs -plibgpod$(SONAME) \
+		-V 'libgpod$(SONAME) (>= $(VERSION))'
+
+%:
+	$(call DH, $@)
+
+.PHONY: clean

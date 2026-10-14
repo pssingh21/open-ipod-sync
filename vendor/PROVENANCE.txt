@@ -1,0 +1,6 @@
+capture_time=2026-10-14T10:51:47+02:00
+architecture=amd64
+base_tree=libgpod-0.8.3
+patched_tree=libgpod-0.8.3-noart-podcast
+source_patch_sha256=5449d43ed157bf61e76c98146dc5feefb31b917e891c272e6150e228f027e81f
+compiled_runtime_copied=no

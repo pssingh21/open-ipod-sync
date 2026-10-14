@@ -1,0 +1,32 @@
+From: Hideki Yamane <henrich@debian.org>
+Date: Sun, 24 Nov 2013 05:43:13 +0800
+Subject: Fix FTBSD on kfreeBSD
+
+Bug-Debian: http://bugs.debian.org/591254
+---
+ tools/generic-callout.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tools/generic-callout.c b/tools/generic-callout.c
+index be5533c..53a0a5c 100644
+--- a/tools/generic-callout.c
++++ b/tools/generic-callout.c
+@@ -588,6 +588,7 @@ static gboolean mounted_ipod_set_properties (ItdbBackend *backend,
+ 
+ static char *mount_ipod (const char *dev_path, const char *fstype)
+ {
++#ifdef __linux__
+         char *filename;
+         char *tmpname;
+         int result;
+@@ -616,6 +617,10 @@ static char *mount_ipod (const char *dev_path, const char *fstype)
+         g_debug("device successfully mounted at %s", tmpname);
+ 
+         return tmpname;
++#else
++#warning mount wrapper for your OS is missing
++        return NULL;
++#endif
+ }
+ 
+ static gboolean write_sysinfo_extended (const char *mountpoint,

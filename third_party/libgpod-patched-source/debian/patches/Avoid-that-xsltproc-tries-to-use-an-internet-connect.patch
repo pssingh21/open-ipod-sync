@@ -1,0 +1,36 @@
+From: Frank Lichtenheld <djpig@dirac.djpig.de>
+Date: Sun, 24 Nov 2013 05:43:13 +0800
+Subject: Avoid that xsltproc tries to use an internet connection
+
+Otherwise sometimes it does, sometimes it doesn't.
+---
+ bindings/python/Makefile.am | 2 +-
+ bindings/python/Makefile.in | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/bindings/python/Makefile.am b/bindings/python/Makefile.am
+index 2dfe30c..f25f6ea 100644
+--- a/bindings/python/Makefile.am
++++ b/bindings/python/Makefile.am
+@@ -48,7 +48,7 @@ gpod_doc.i: $(srcdir)/gpod_doc.i.in $(srcdir)/gtkdoc-to-swig.xsl
+ 	cat $< > $@
+ 	-if test -x "`which xsltproc 2>/dev/null`"; then \
+ 	    for xml in $(top_srcdir)/docs/reference/xml/*.xml; do \
+-		xsltproc $(srcdir)/gtkdoc-to-swig.xsl $$xml; \
++		xsltproc -nonet $(srcdir)/gtkdoc-to-swig.xsl $$xml; \
+ 	    done >> $@; \
+ 	fi
+ 
+diff --git a/bindings/python/Makefile.in b/bindings/python/Makefile.in
+index 511cf99..7140d05 100644
+--- a/bindings/python/Makefile.in
++++ b/bindings/python/Makefile.in
+@@ -1009,7 +1009,7 @@ README: README.in gpod.i
+ @HAVE_PYTHON_TRUE@	cat $< > $@
+ @HAVE_PYTHON_TRUE@	-if test -x "`which xsltproc 2>/dev/null`"; then \
+ @HAVE_PYTHON_TRUE@	    for xml in $(top_srcdir)/docs/reference/xml/*.xml; do \
+-@HAVE_PYTHON_TRUE@		xsltproc $(srcdir)/gtkdoc-to-swig.xsl $$xml; \
++@HAVE_PYTHON_TRUE@		xsltproc -nonet $(srcdir)/gtkdoc-to-swig.xsl $$xml; \
+ @HAVE_PYTHON_TRUE@	    done >> $@; \
+ @HAVE_PYTHON_TRUE@	fi
+ 

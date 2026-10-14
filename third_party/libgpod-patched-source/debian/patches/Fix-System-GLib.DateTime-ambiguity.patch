@@ -1,0 +1,21 @@
+From: Chow Loong Jin <hyperair@debian.org>
+Date: Thu, 2 Jan 2014 03:09:21 +0800
+Subject: Fix System/GLib.DateTime ambiguity
+
+---
+ bindings/mono/libgpod-sharp/Artwork.cs | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/bindings/mono/libgpod-sharp/Artwork.cs b/bindings/mono/libgpod-sharp/Artwork.cs
+index 5773e35..fe84c4d 100644
+--- a/bindings/mono/libgpod-sharp/Artwork.cs
++++ b/bindings/mono/libgpod-sharp/Artwork.cs
+@@ -22,6 +22,8 @@ namespace GPod {
+ 	using GLib;
+ 	using Gdk;
+ 	using native;
++
++	using DateTime = System.DateTime;
+ 	
+ 	namespace native {
+ #if ALIGNMENT_X86_LINUX

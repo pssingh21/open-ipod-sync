@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Build/package output
+build/
+dist/
+*.deb
+
+# Native build output
+*.o
+*.a
+*.la
+*.lo
+*.so
+*.so.*
+.libs/
+
+# Autotools/generated build state
+autom4te.cache/
+config.log
+config.status
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Quilt patch working state
+.pc/

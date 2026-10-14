@@ -1,0 +1,5 @@
+Fix-FTBSD-on-kfreeBSD.patch
+Avoid-that-xsltproc-tries-to-use-an-internet-connect.patch
+Upstream-change-to-speed-up-itdb_resolve_path-calls.patch
+Fix-System-GLib.DateTime-ambiguity.patch
+Fix-wrong-char-for-comments-in-gpod.i.patch

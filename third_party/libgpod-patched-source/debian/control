@@ -1,0 +1,119 @@
+Source: libgpod
+Priority: optional
+Section: libs
+Maintainer: Debian QA Group <packages@qa.debian.org>
+Build-Depends: debhelper-compat (= 12),
+               dh-python,
+               intltool,
+               pkg-config,
+               libglib2.0-dev (>= 2.16),
+               libgdk-pixbuf-2.0-dev | libgdk-pixbuf2.0-dev,
+               libxml2-dev,
+               libsgutils2-dev,
+               libsqlite3-dev,
+               libplist-dev,
+               libusb-1.0-0-dev,
+               libimobiledevice-dev,
+               zlib1g-dev,
+               swig,
+               chrpath,
+               gtk-doc-tools,
+               docbook-xml,
+               xsltproc,
+               cli-common-dev (>= 0.8~) [amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x] <!nocil>,
+               mono-devel (>= 2.4.3) [amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x] <!nocil>,
+               libgtk2.0-cil-dev (>= 2.12) [amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x] <!nocil>,
+               libglib2.0-cil-dev (>= 2.12) [amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x] <!nocil>
+Rules-Requires-Root: no
+Homepage: http://www.gtkpod.org/wiki/Libgpod
+Standards-Version: 4.2.1
+Vcs-Git: https://salsa.debian.org/debian/libgpod.git
+Vcs-Browser: https://salsa.debian.org/debian/libgpod
+
+Package: libgpod-dev
+Section: libdevel
+Architecture: any
+Depends: libgpod4 (= ${binary:Version}), libglib2.0-dev,
+         libgdk-pixbuf-2.0-dev | libgdk-pixbuf2.0-dev,
+         libimobiledevice-dev, ${misc:Depends}
+Suggests: libgpod-doc
+Breaks: libgpod-nogtk-dev (<< 0.8.3-8.1~)
+Replaces: libgpod-nogtk-dev (<< 0.8.3-8.1~)
+Multi-Arch: same
+Description: development files for libgpod
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy to use API to retrieve the list of files and playlist
+ stored on an iPod, to modify them and to save them back to the iPod.
+ .
+ This package contains the include files and static library.
+
+Package: libgpod4
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Pre-Depends: ${misc:Pre-Depends}
+Recommends: libgpod-common
+Breaks: libgpod4-nogtk (<< 0.8.3-8.1~)
+Replaces: libgpod4-nogtk (<< 0.8.3-8.1~)
+Multi-Arch: same
+Description: library to read and write songs and artwork to an iPod
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy to use API to retrieve the list of files and playlist
+ stored on an iPod, to modify them and to save them back to the iPod
+ .
+ This package contains the shared library.
+
+Package: libgpod-common
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Replaces: libgpod0 (<< 0.3.0-4)
+Description: common files for libgpod
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy to use API to retrieve the list of files and playlist
+ stored on an iPod, to modify them and to save them back to the iPod.
+ .
+ This package contains
+  - internationalization support
+  - udev support
+
+Package: libgpod-doc
+Section: doc
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}
+Replaces: libgpod0 (<< 0.3.0-4), libgpod-common (<< 0.6.0-6)
+Description: documentation for libgpod
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy to use API to retrieve the list of files and playlist
+ stored on an iPod, to modify them and to save them back to the iPod.
+ .
+ This package contains documentation and examples.
+
+Package: libgpod-cil
+Build-Profiles: <!nocil>
+Section: cli-mono
+Architecture: amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x
+Depends: ${cli:Depends}, ${misc:Depends}
+Description: CLI bindings for libgpod
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy way to use API to retrieve the list of files and
+ playlist storeed on an iPod, to modify them and to save them back to
+ the iPod.
+ .
+ This package contains the managed CLI bindings for libgpod, which
+ are needed to run CLI applications which use this library.
+
+Package: libgpod-cil-dev
+Build-Profiles: <!nocil>
+Section: cli-mono
+Architecture: amd64 armel armhf arm64 i386 mipsel kfreebsd-amd64 kfreebsd-i386 ppc64 ppc64el s390x
+Depends: libgpod-cil (= ${binary:Version}), libgtk2.0-cil-dev, ${misc:Depends}
+Multi-Arch: same
+Description: CLI bindings for libgpod -- development files
+ libgpod is a library meant to abstract access to an iPod's content. It
+ provides an easy way to use API to retrieve the list of files and
+ playlist storeed on an iPod, to modify them and to save them back to
+ the iPod.
+ .
+ This package contains the development files for libgpod-sharp library,
+ and should be used for compilation of CLI applications which use this
+ library.
