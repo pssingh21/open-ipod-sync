@@ -586,6 +586,206 @@ jobs:
 
           ./tools/test-package-lifecycle.sh "${packages[0]}"
 
+  ubuntu-host-compatibility:
+    name: Ubuntu host compatibility — ${{ matrix.os }}
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-26.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show host environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "runner: ${{ matrix.os }}"
+          cat /etc/os-release
+          echo
+          uname -a
+          echo
+          python3 --version
+          gcc --version | head -n 1
+          dpkg --print-architecture
+
+      - name: Install source-build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          sudo apt-get update
+
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git \
+            bash \
+            python3 \
+            build-essential \
+            dpkg-dev \
+            pkg-config \
+            intltool \
+            gettext \
+            libglib2.0-dev \
+            libsqlite3-dev \
+            libimobiledevice-dev \
+            libplist-dev \
+            libxml2-dev \
+            zlib1g-dev \
+            libusb-1.0-0-dev \
+            file
+
+      - name: Report library versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "glib:"
+          pkg-config --modversion glib-2.0
+
+          echo "sqlite3:"
+          pkg-config --modversion sqlite3
+
+          echo "libimobiledevice:"
+          pkg-config --modversion libimobiledevice-1.0
+
+          echo "libplist:"
+          if pkg-config --exists libplist; then
+            pkg-config --modversion libplist
+          else
+            pkg-config --modversion libplist-2.0
+          fi
+
+          echo "libxml2:"
+          pkg-config --modversion libxml-2.0
+
+      - name: Run public source sanity suite
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./tools/public-sanity-check.sh
+
+      - name: Build package from source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./build-deb.sh
+
+          mapfile -t debs < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print |
+            sort
+          )
+
+          [[ "${#debs[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one amd64 Debian package; " \
+                 "found ${#debs[@]}" >&2
+            printf '%s\n' "${debs[@]}" >&2
+            exit 1
+          }
+
+          echo "built package:"
+          printf '%s\n' "${debs[0]}"
+
+          dpkg-deb -f "${debs[0]}" \
+            Package \
+            Version \
+            Architecture \
+            Depends
+
+      - name: Audit host-built package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t debs < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print |
+            sort
+          )
+
+          [[ "${#debs[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one package for audit" >&2
+            exit 1
+          }
+
+          ./tools/audit-deb.sh "${debs[0]}"
+
+      - name: Report runtime package-name compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t debs < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print |
+            sort
+          )
+
+          [[ "${#debs[@]}" -eq 1 ]]
+
+          echo "Generated package Depends:"
+          dpkg-deb -f "${debs[0]}" Depends
+
+          echo
+          echo "Host package-name availability:"
+          for package in \
+            libimobiledevice6 \
+            libimobiledevice-1.0-6 \
+            libplist3 \
+            libplist-2.0-4 \
+            ifuse \
+            libimobiledevice-utils
+          do
+            echo
+            echo "--- $package ---"
+
+            apt-cache policy "$package" 2>/dev/null || true
+          done
+
+          echo
+          echo "NOTE:"
+          echo "This step is diagnostic only."
+          echo "Binary-package installability is intentionally not asserted here."
+
+      - name: Verify build did not modify tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --exit-code
+          git diff --cached --exit-code
+
+          rm -rf -- build dist
+
+          git diff --exit-code
+          git diff --cached --exit-code
+
+          echo "tracked source remains unchanged: PASS"
+
   attest-supply-chain:
     name: GitHub artifact attestations
 
