@@ -228,3 +228,138 @@ jobs:
             ci-artifact/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
+
+  reproducibility-check:
+    name: Debian 11 reproducibility gate
+    needs: package-build-audit
+    runs-on: ubuntu-latest
+
+    container:
+      image: debian:11
+
+    steps:
+      - name: Install Debian 11 build dependencies
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+
+          cat > /etc/apt/sources.list <<'APT'
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye-updates main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260830T235959Z/ bullseye-security main
+          APT
+
+          cat > /etc/apt/apt.conf.d/80-ci-retries <<'APT'
+          Acquire::Retries "5";
+          Acquire::http::Timeout "60";
+          Acquire::https::Timeout "60";
+          APT
+
+          apt-get update
+
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git \
+            bash \
+            python3 \
+            build-essential \
+            dpkg-dev \
+            pkg-config \
+            intltool \
+            gettext \
+            libglib2.0-dev \
+            libsqlite3-dev \
+            libimobiledevice-dev \
+            libplist-dev \
+            libxml2-dev \
+            zlib1g-dev \
+            libusb-1.0-0-dev \
+            file
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Trust CI checkout for Git metadata
+        run: |
+          set -euo pipefail
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD
+          git -C "$GITHUB_WORKSPACE" log -1 --format='epoch=%ct date=%cI'
+
+      - name: Download audited build
+        uses: actions/download-artifact@v8
+        with:
+          name: ipod-sync-debian11-amd64-${{ github.sha }}
+          path: baseline
+
+      - name: Verify audited build artifact
+        run: |
+          set -euo pipefail
+
+          (
+            cd baseline
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Build independent comparison package
+        run: |
+          set -euo pipefail
+          ./build-deb.sh
+
+      - name: Verify reproducible Debian package
+        run: |
+          set -euo pipefail
+
+          mapfile -t baseline_packages < <(
+            find baseline \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          mapfile -t rebuilt_packages < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          if [[ "${#baseline_packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one baseline package" >&2
+            exit 1
+          fi
+
+          if [[ "${#rebuilt_packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one independently rebuilt package" >&2
+            exit 1
+          fi
+
+          baseline="${baseline_packages[0]}"
+          rebuilt="${rebuilt_packages[0]}"
+
+          echo "===== BASELINE ====="
+          sha256sum "$baseline"
+
+          echo
+          echo "===== INDEPENDENT REBUILD ====="
+          sha256sum "$rebuilt"
+
+          echo
+          echo "===== REPRODUCIBILITY ====="
+
+          if ! cmp -s "$baseline" "$rebuilt"; then
+            echo "ERROR: Debian package is not byte-for-byte reproducible" >&2
+            exit 1
+          fi
+
+          echo "PASS: Debian package is byte-for-byte reproducible"
+
