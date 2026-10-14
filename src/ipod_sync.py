@@ -2504,6 +2504,181 @@ def build_candidate(source: Path, mount: Path, run_dir: Path) -> Candidate | Non
         return None
     return build_generic_candidate(mount, tracks, run_dir)
 
+def _doctor_row(label: str, status: str, detail: str = ""):
+    suffix = f" ({detail})" if detail else ""
+    print(f"  {label + ':':<30} {status}{suffix}")
+
+
+def doctor(source: Path, mount: Path) -> int:
+    """Read-only readiness and safety diagnostics.
+
+    This function must not mount/remount the iPod, create transaction state,
+    enter the synchronization envelope, or modify source/device files.
+    """
+    source = source.expanduser().resolve()
+    mount = mount.expanduser().resolve()
+
+    ready = True
+
+    print(f"{APP} {VERSION} doctor")
+    print(f"source: {source}")
+    print(f"mount:  {mount}")
+
+    print()
+    print("Dependencies")
+
+    commands = (
+        "python3",
+        "ifuse",
+        "fusermount",
+        "mountpoint",
+        "findmnt",
+        "idevice_id",
+        "idevicepair",
+        "ffmpeg",
+        "ffprobe",
+        "gcc",
+        "pkg-config",
+    )
+
+    for name in commands:
+        try:
+            path = require_cmd(name)
+        except SyncError:
+            _doctor_row(name, "MISSING")
+            ready = False
+        else:
+            _doctor_row(name, "PASS", path)
+
+    print()
+    print("Packaged components")
+
+    components = (
+        ("sync-envelope", SYNC_ENVELOPE),
+        ("sign-cdb.c", SIGN_CDB_SRC),
+        ("rijndael.c", RIJNDAEL_SRC),
+        ("cdb.py", PROJECT / "ipodctl/cdb.py"),
+    )
+
+    for label, path in components:
+        if path.is_file():
+            _doctor_row(label, "PASS", str(path))
+        else:
+            _doctor_row(label, "MISSING", str(path))
+            ready = False
+
+    try:
+        inc, libdir = find_libgpod_install()
+    except SyncError as exc:
+        _doctor_row("patched libgpod", "MISSING", str(exc))
+        ready = False
+    else:
+        _doctor_row(
+            "patched libgpod",
+            "PASS",
+            f"include={inc} lib={libdir}",
+        )
+
+    print()
+    print("Source safety")
+
+    if not source.is_dir():
+        _doctor_row("source directory", "MISSING", str(source))
+        ready = False
+    else:
+        _doctor_row("source directory", "PASS", str(source))
+
+        try:
+            source_guard = require_source_ro(source)
+        except SyncError as exc:
+            _doctor_row("read-only source barrier", "FAIL", str(exc))
+            ready = False
+        else:
+            _doctor_row(
+                "read-only source barrier",
+                "PASS",
+                f"{source_guard.fstype} mount {source_guard.mountpoint}",
+            )
+
+            try:
+                assert_no_write_roots_on_source(source_guard, mount)
+            except SyncError as exc:
+                _doctor_row("source isolation", "FAIL", str(exc))
+                ready = False
+            else:
+                _doctor_row("source isolation", "PASS")
+
+    print()
+    print("iPod safety")
+
+    mi = mount_info(mount)
+
+    if mi is None:
+        _doctor_row("iPod mount", "ABSENT", str(mount))
+        ready = False
+    else:
+        _, _, fstype, opts = mi
+
+        if fstype == "fuse.ifuse":
+            _doctor_row("ifuse filesystem", "PASS", fstype)
+        else:
+            _doctor_row("ifuse filesystem", "FAIL", fstype)
+            ready = False
+
+        if "ro" in opts and "rw" not in opts:
+            _doctor_row(
+                "mount mode",
+                "PASS",
+                "read-only",
+            )
+        else:
+            _doctor_row(
+                "mount mode",
+                "FAIL",
+                ",".join(sorted(opts)),
+            )
+            ready = False
+
+    try:
+        device_id = verify_device_connection()
+    except SyncError as exc:
+        _doctor_row("device connection", "ABSENT", str(exc))
+        ready = False
+    else:
+        _doctor_row("device connection", "PASS", device_id)
+
+    print()
+    print("Recovery")
+
+    if ACTIVE_TXN.is_file():
+        detail = str(ACTIVE_TXN)
+
+        try:
+            journal = load_json(ACTIVE_TXN)
+        except Exception as exc:
+            detail = f"{ACTIVE_TXN}; unreadable journal: {exc}"
+        else:
+            detail = (
+                f"phase={journal.get('phase')} "
+                f"run_dir={journal.get('run_dir')}"
+            )
+
+        _doctor_row("active transaction", "PRESENT", detail)
+        ready = False
+    else:
+        _doctor_row("active transaction", "none")
+
+    print()
+    print("Overall")
+
+    if ready:
+        _doctor_row("readiness", "PASS")
+        return 0
+
+    _doctor_row("readiness", "NOT READY")
+    return 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="ADD-only legacy iPod music sync with a kernel read-only source"
@@ -2522,10 +2697,24 @@ def main(argv=None) -> int:
         "--recover-check", action="store_true",
         help="read-only inspection of an incomplete transaction; never writes to the iPod",
     )
+    ap.add_argument(
+        "--doctor", action="store_true",
+        help="read-only environment, source-safety, device, and recovery diagnostics",
+    )
     ap.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     args = ap.parse_args(argv)
 
+    if args.doctor and (args.apply or args.recover or args.recover_check):
+        raise SyncError(
+            "--doctor cannot be combined with --apply, --recover, or --recover-check"
+        )
+
     mount = args.mount.expanduser().resolve()
+
+    if args.doctor:
+        source = args.source.expanduser().resolve()
+        return doctor(source, mount)
+
     require_ifuse_mount(mount, writable=False)
 
     if args.recover and args.recover_check:

@@ -416,4 +416,203 @@ with tempfile.TemporaryDirectory() as td:
     assert called_candidate is candidate
 
 
+
+# ---------------------------------------------------------------------------
+# 8. --doctor routes before the normal ifuse gate and remains read-only.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+
+    source.mkdir()
+    mount.mkdir()
+
+    project = root / "project"
+    (project / "ipodctl").mkdir(parents=True)
+
+    cdb_py = project / "ipodctl/cdb.py"
+    cdb_py.write_text("synthetic\n")
+
+    sync_envelope = root / "sync-envelope"
+    sign_cdb = root / "sign-cdb.c"
+    rijndael = root / "rijndael.c"
+
+    for path in (sync_envelope, sign_cdb, rijndael):
+        path.write_text("synthetic\n")
+
+    active = root / "active.json"
+    run_root = root / "runs"
+
+    source_before = sorted(
+        str(path.relative_to(source))
+        for path in source.rglob("*")
+    )
+    mount_before = sorted(
+        str(path.relative_to(mount))
+        for path in mount.rglob("*")
+    )
+
+    events = []
+
+    guard = m.SourceGuard(
+        source_root=source.resolve(),
+        mountpoint=source.resolve(),
+        device="//synthetic/music",
+        fstype="cifs",
+    )
+
+    class ForbiddenEnvelope:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "doctor attempted to enter SyncEnvelope"
+            )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "doctor attempted a write-capable operation"
+        )
+
+    with patched(
+        PROJECT=project,
+        SYNC_ENVELOPE=sync_envelope,
+        SIGN_CDB_SRC=sign_cdb,
+        RIJNDAEL_SRC=rijndael,
+        ACTIVE_TXN=active,
+        RUN_ROOT=run_root,
+        require_cmd=lambda name: f"/usr/bin/{name}",
+        require_source_ro=lambda path:
+            events.append("source-ro") or guard,
+        assert_no_write_roots_on_source=lambda g, ipod:
+            events.append("source-isolation"),
+        mount_info=lambda path: (
+            "/dev/synthetic",
+            str(mount.resolve()),
+            "fuse.ifuse",
+            {"ro", "nosuid"},
+        ),
+        verify_device_connection=lambda:
+            events.append("device-check") or "synthetic-device",
+        find_libgpod_install=lambda:
+            (root / "gpod-include", root / "gpod-lib"),
+        require_ifuse_mount=forbidden,
+        remount_ifuse=forbidden,
+        apply_transaction=forbidden,
+        recover_check=forbidden,
+        recover_transaction=forbidden,
+        SyncEnvelope=ForbiddenEnvelope,
+    ):
+        rc = m.main([
+            "--doctor",
+            "--source", str(source),
+            "--mount", str(mount),
+        ])
+
+    assert rc == 0
+    assert events == [
+        "source-ro",
+        "source-isolation",
+        "device-check",
+    ]
+
+    assert not active.exists()
+    assert not run_root.exists()
+
+    source_after = sorted(
+        str(path.relative_to(source))
+        for path in source.rglob("*")
+    )
+    mount_after = sorted(
+        str(path.relative_to(mount))
+        for path in mount.rglob("*")
+    )
+
+    assert source_after == source_before
+    assert mount_after == mount_before
+
+
+# ---------------------------------------------------------------------------
+# 9. --doctor must reject every write/recovery mode combination.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+
+    with patched(
+        doctor=lambda source, mount:
+            (_ for _ in ()).throw(
+                AssertionError(
+                    "conflicting doctor mode reached doctor()"
+                )
+            ),
+    ):
+        for flag in ("--apply", "--recover", "--recover-check"):
+            expect_sync_error(
+                lambda flag=flag: m.main([
+                    "--doctor",
+                    flag,
+                    "--source", str(root),
+                    "--mount", str(root),
+                ]),
+                "--doctor cannot be combined",
+            )
+
+
+# ---------------------------------------------------------------------------
+# 10. Doctor reports incomplete readiness without mounting/remounting.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "missing-source"
+    mount = root / "missing-device"
+
+    active = root / "active.json"
+
+    forbidden_calls = []
+
+    def forbidden(*args, **kwargs):
+        forbidden_calls.append((args, kwargs))
+        raise AssertionError(
+            "doctor attempted a mount/remount or transaction operation"
+        )
+
+    with patched(
+        PROJECT=root / "missing-project",
+        SYNC_ENVELOPE=root / "missing-sync-envelope",
+        SIGN_CDB_SRC=root / "missing-sign-cdb.c",
+        RIJNDAEL_SRC=root / "missing-rijndael.c",
+        ACTIVE_TXN=active,
+        require_cmd=lambda name:
+            (_ for _ in ()).throw(
+                m.SyncError(f"required command not found: {name}")
+            ),
+        mount_info=lambda path: None,
+        verify_device_connection=lambda:
+            (_ for _ in ()).throw(
+                m.SyncError(
+                    "expected exactly one connected iOS device; found 0"
+                )
+            ),
+        find_libgpod_install=lambda:
+            (_ for _ in ()).throw(
+                m.SyncError("patched libgpod missing")
+            ),
+        require_ifuse_mount=forbidden,
+        remount_ifuse=forbidden,
+        apply_transaction=forbidden,
+        recover_transaction=forbidden,
+        SyncEnvelope=lambda *args, **kwargs: forbidden(),
+    ):
+        rc = m.main([
+            "--doctor",
+            "--source", str(source),
+            "--mount", str(mount),
+        ])
+
+    assert rc == 1
+    assert forbidden_calls == []
+
+
 print("CLI safety routing tests: PASS")

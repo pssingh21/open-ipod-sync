@@ -102,6 +102,68 @@ ACTUAL_VERSION="$(ipod-sync version)"
 echo "version check: PASS"
 
 echo
+echo "===== INSTALLED DOCTOR READ-ONLY PATH ====="
+
+DOCTOR_SOURCE=/mnt/music
+DOCTOR_MOUNT="$HOME/ipod"
+DOCTOR_STATE="$HOME/doctor-state-must-not-be-created"
+
+[[ ! -e "$DOCTOR_SOURCE" ]] || {
+  echo "ERROR: doctor test source unexpectedly exists: $DOCTOR_SOURCE" >&2
+  exit 1
+}
+
+[[ ! -e "$DOCTOR_MOUNT" ]] || {
+  echo "ERROR: doctor test mount unexpectedly exists before doctor: $DOCTOR_MOUNT" >&2
+  exit 1
+}
+
+[[ ! -e "$DOCTOR_STATE" ]] || {
+  echo "ERROR: isolated doctor state path unexpectedly exists before doctor: $DOCTOR_STATE" >&2
+  exit 1
+}
+
+if DOCTOR_OUTPUT="$(
+  IPOD_SYNC_STATE_DIR="$DOCTOR_STATE" \
+    ipod-sync doctor 2>&1
+)"; then
+  DOCTOR_RC=0
+else
+  DOCTOR_RC=$?
+fi
+
+printf '%s\n' "$DOCTOR_OUTPUT"
+
+[[ "$DOCTOR_RC" -eq 1 ]] || {
+  echo "ERROR: expected doctor exit 1 for absent source/device, got $DOCTOR_RC" >&2
+  exit 1
+}
+
+grep -F "ipod-sync $EXPECTED_APP_VERSION doctor" <<<"$DOCTOR_OUTPUT"
+grep -F "source: $DOCTOR_SOURCE" <<<"$DOCTOR_OUTPUT"
+grep -F "mount:  $DOCTOR_MOUNT" <<<"$DOCTOR_OUTPUT"
+grep -F "Overall" <<<"$DOCTOR_OUTPUT"
+grep -F "readiness:" <<<"$DOCTOR_OUTPUT"
+grep -F "NOT READY" <<<"$DOCTOR_OUTPUT"
+
+if grep -F "iPod mounted read-only:" <<<"$DOCTOR_OUTPUT"; then
+  echo "ERROR: doctor appears to have mounted the iPod" >&2
+  exit 1
+fi
+
+[[ ! -e "$DOCTOR_MOUNT" ]] || {
+  echo "ERROR: doctor created or mounted the configured iPod path" >&2
+  exit 1
+}
+
+[[ ! -e "$DOCTOR_STATE" ]] || {
+  echo "ERROR: doctor created transaction/state storage" >&2
+  exit 1
+}
+
+echo "installed doctor read-only path: PASS"
+
+echo
 echo "===== USER CONFIG EDIT ====="
 
 cat > "$CONFIG" <<'CONF'
