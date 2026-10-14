@@ -186,6 +186,17 @@ Preview synchronization:
 ipod-sync plan
 ```
 
+For machine-readable automation, request the same dry-run plan as JSON:
+
+```bash
+ipod-sync plan --json
+```
+
+JSON mode writes only the JSON document to stdout. Planning remains read-only
+with respect to the configured source filesystem and iPod; as with the normal
+planner, temporary candidate files may be staged under the local ipod-sync
+state directory.
+
 Only after reviewing the plan should a live transaction be explicitly requested:
 
 ```bash
