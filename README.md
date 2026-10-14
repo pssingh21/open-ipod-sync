@@ -621,8 +621,6 @@ Failures are handled fail-closed.
 
 `open-ipod-sync` is designed so public source and release artifacts can be independently inspected.
 
-This is the single README section covering project privacy and release-integrity properties.
-
 ## Privacy
 
 Public-source and package audits check for known development-machine and private-environment fingerprints.
