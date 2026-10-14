@@ -25,16 +25,16 @@ The project can:
 Current release:
 
 ```text
-0.2.0-alpha.5
+0.2.0-alpha.6
 ```
 
 This software is **experimental**.
 
-Alpha.5 is primarily a safety, reproducibility, CI, package-validation, and
-recovery-hardening update. It adds automated package auditing, byte-for-byte
-reproducibility verification, package lifecycle testing, synthetic planner and
-transaction regression coverage, recovery-state-machine coverage, and
-fail-closed validation of transaction journal phases.
+Alpha.6 focuses on read-only diagnostics and automation, temporary-file
+hardening, and release supply-chain integrity. It adds machine-readable
+`plan --json`, improved `doctor` diagnostics, reproducible SPDX 2.3 SBOM and
+provenance metadata, and GitHub/Sigstore-backed artifact attestations. The
+synchronization scope remains generic incremental ADD-only.
 
 The synchronization scope remains generic incremental ADD-only.
 
@@ -60,7 +60,7 @@ The public `0.2.0-alpha.3` predecessor additionally passed:
 - real-device read-only/idempotency planning.
 
 A fresh live ADD transaction has not yet been performed with the exact
-`0.2.0-alpha.5` release artifact itself. Treat this release as an alpha.
+`0.2.0-alpha.6` release artifact itself. Treat this release as an alpha.
 
 ## Tested platform
 
@@ -149,7 +149,7 @@ There is no hardcoded device-specific template identifier.
 On the currently tested Debian 11 amd64 environment:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0.alpha5_amd64.deb
+sudo apt install ./ipod-sync_0.2.0.alpha6_amd64.deb
 ```
 
 Then edit:
@@ -306,7 +306,7 @@ against downloaded artifacts with the GitHub CLI.
 Verify SLSA build provenance:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha5_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
   --repo pssingh21/open-ipod-sync
 ```
 
@@ -316,7 +316,7 @@ The same command can be used for the downloaded `.spdx.json`,
 Verify the SPDX 2.3 SBOM attestation attached to the Debian package:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha5_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
   --repo pssingh21/open-ipod-sync \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
