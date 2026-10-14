@@ -24,12 +24,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python 3.9
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.9'
 
@@ -129,7 +129,7 @@ jobs:
             file
 
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -220,7 +220,7 @@ jobs:
           cat ci-artifact/SHA256SUMS
 
       - name: Upload audited Debian package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ipod-sync-debian11-amd64-${{ github.sha }}
           path: |
@@ -284,7 +284,7 @@ jobs:
             file
 
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -298,7 +298,7 @@ jobs:
           git -C "$GITHUB_WORKSPACE" log -1 --format='epoch=%ct date=%cI'
 
       - name: Download audited build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ipod-sync-debian11-amd64-${{ github.sha }}
           path: baseline
