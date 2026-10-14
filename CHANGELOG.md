@@ -2,6 +2,66 @@
 
 All notable public changes to `open-ipod-sync` will be documented here.
 
+## 0.2.0-alpha.6 — 2026-10-14
+
+Read-only automation, diagnostics, temporary-file safety, and supply-chain
+hardening update.
+
+### Added
+
+- Machine-readable `ipod-sync plan --json` output with a versioned schema,
+  synchronization safety flags, planned ADD tracks, media-byte totals,
+  candidate hashes, and destination information.
+- Read-only JSON planner regression coverage for both new-track and no-op plans.
+- Deterministic SPDX 2.3 JSON SBOM generation for the audited Debian package.
+- Deterministic `PROVENANCE.json` metadata binding the Debian artifact, source
+  commit, `SOURCE_DATE_EPOCH`, generated SBOM, bundled libgpod patch, and
+  selected packaged-component hashes.
+- GitHub/Sigstore-backed SLSA build-provenance attestations for the Debian
+  package, SPDX SBOM, `PROVENANCE.json`, and `SHA256SUMS`.
+- SPDX 2.3 SBOM attestation bound directly to the Debian package.
+
+### Changed
+
+- `ipod-sync doctor` now uses the authoritative Python diagnostics path and
+  reports dependencies, packaged components, source safety, iPod mount state,
+  device connection state, recovery state, and overall readiness.
+- Replaced the patched libgpod SQLite exporter's unsafe `tmpnam()` temporary
+  path creation with GLib temporary-directory creation.
+- Deduplicated the pinned Debian 11 CI setup while preserving the existing
+  snapshot, build, reproducibility, and lifecycle gates.
+- The Debian reproducibility gate now independently regenerates and
+  byte-compares the package, SPDX SBOM, provenance metadata, and
+  `SHA256SUMS`.
+- GitHub attestation signing permissions are isolated to a post-gate,
+  `main`-branch-only job.
+
+### Validated
+
+- Real-device `plan --json` completed successfully against the configured
+  kernel-read-only NAS source and read-only `ifuse` iPod mount with an
+  idempotent zero-ADD result.
+- Real-device JSON planning produced valid JSON, emitted no stderr, armed no
+  synchronization transaction journal, and left both mounts read-only.
+- The real Debian package SBOM and provenance were generated twice and verified
+  byte-for-byte identical.
+- The post-merge GitHub Actions attestation path was verified with the GitHub
+  CLI for SLSA provenance and the SPDX 2.3 SBOM predicate, including GitHub
+  repository/workflow identity and GitHub-hosted runner policy.
+
+### Release intent
+
+Alpha.6 strengthens read-only inspection and automation and adds verifiable
+release supply-chain metadata. It does not add any new synchronization
+write behavior.
+
+Synchronization remains generic incremental ADD-only. Delete synchronization,
+rename synchronization, and metadata updates for existing tracks remain out of
+scope.
+
+A fresh live ADD transaction has not yet been performed with the exact
+`0.2.0-alpha.6` release artifact.
+
 ## 0.2.0-alpha.5 — 2026-10-14
 
 Safety, reproducibility, CI, package-validation, and recovery-hardening update.

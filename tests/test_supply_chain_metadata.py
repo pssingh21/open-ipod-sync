@@ -43,9 +43,9 @@ vendor = {
 
 doc = m.make_spdx_document(
     package="ipod-sync",
-    version="0.2.0~alpha5",
+    version="0.2.0~alpha6",
     architecture="amd64",
-    deb_name="ipod-sync_0.2.0~alpha5_amd64.deb",
+    deb_name="ipod-sync_0.2.0~alpha6_amd64.deb",
     deb_sha256="cd" * 32,
     dependencies=[
         "ffmpeg",
@@ -114,12 +114,12 @@ with tempfile.TemporaryDirectory() as td:
 
 provenance = m.make_provenance_document(
     package="ipod-sync",
-    version="0.2.0~alpha5",
+    version="0.2.0~alpha6",
     architecture="amd64",
-    deb_name="ipod-sync_0.2.0~alpha5_amd64.deb",
+    deb_name="ipod-sync_0.2.0~alpha6_amd64.deb",
     deb_sha256="cd" * 32,
     sbom_name=(
-        "ipod-sync_0.2.0~alpha5_amd64.spdx.json"
+        "ipod-sync_0.2.0~alpha6_amd64.spdx.json"
     ),
     sbom_sha256="ef" * 32,
     git_commit="12" * 20,
