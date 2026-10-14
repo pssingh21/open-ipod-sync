@@ -54,7 +54,7 @@ for marker in ("EXPECT_"+"RND", "EXPECT_"+"IV", "EXPECT_"+"PRISTINE_SIG"):
     assert marker not in signer
 
 v=subprocess.run([sys.executable,str(APP),'--version'],text=True,capture_output=True,check=True).stdout.strip()
-assert '0.2.0-alpha.3' in v,v
+assert '0.2.0-alpha.4' in v,v
 
 text=APP.read_text()
 assert ('audited-' + 'frozen') not in text

@@ -1,6 +1,26 @@
 # Changelog
 
-All notable public changes to `ipod-sync` will be documented here.
+All notable public changes to `open-ipod-sync` will be documented here.
+
+## 0.2.0-alpha.4 — 2026-10-14
+
+Release-integrity and provenance update.
+
+### Changed
+
+- Bumped runtime version to `0.2.0-alpha.4`.
+- Bumped Debian package version to `0.2.0~alpha4`.
+- Align the explicit source release archive with the public Git repository.
+- Align published checksum filenames with GitHub release-asset naming.
+- Preserve the validated ADD-only synchronization behavior from alpha.3.
+
+### Release intent
+
+Alpha.4 is intended to establish a clean release baseline where the Git tag,
+public source tree, explicit source archive, Debian package, and checksums all
+correspond to the same public release.
+
+No new device-write behavior is introduced in this release.
 
 ## 0.2.0-alpha.3 — 2026-10-14
 

@@ -25,10 +25,14 @@ The project can:
 Current release:
 
 ```text
-0.2.0-alpha.3
+0.2.0-alpha.4
 ```
 
 This software is **experimental**.
+
+Alpha.4 is primarily a release-integrity and provenance update. It aligns the
+tagged public Git tree, explicit source archive, package version, and published
+checksums. The synchronization behavior is otherwise unchanged from alpha.3.
 
 The generic incremental ADD path has been live-tested end-to-end during development, including:
 
@@ -40,7 +44,7 @@ The generic incremental ADD path has been live-tested end-to-end during developm
 - post-commit database validation;
 - physical playback on the iPod.
 
-The public `0.2.0-alpha.3` package has additionally passed:
+The public `0.2.0-alpha.3` predecessor additionally passed:
 
 - source privacy checks;
 - package privacy checks;
@@ -52,7 +56,7 @@ The public `0.2.0-alpha.3` package has additionally passed:
 - real-device read-only/idempotency planning.
 
 A fresh live ADD transaction has not yet been performed with the exact
-`0.2.0-alpha.3` release artifact itself. Treat this release as an alpha.
+`0.2.0-alpha.4` release artifact itself. Treat this release as an alpha.
 
 ## Tested platform
 
@@ -141,7 +145,7 @@ There is no hardcoded device-specific template identifier.
 On the currently tested Debian 11 amd64 environment:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0~alpha3_amd64.deb
+sudo apt install ./ipod-sync_0.2.0~alpha4_amd64.deb
 ```
 
 Then edit:
@@ -258,6 +262,9 @@ compiled library objects, Python bytecode caches, and development-machine paths.
 
 Before a release is published, both the source tree and generated package should
 pass their privacy and ownership audits.
+
+Release-specific SHA-256 checksums are published as a `SHA256SUMS` asset with
+each GitHub release rather than being stored inside the tagged source tree.
 
 ## Known limitations
 
