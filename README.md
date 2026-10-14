@@ -25,18 +25,8 @@ The project can:
 Current release:
 
 ```text
-0.2.0-alpha.6
-```
-
-Current development version on `main`:
-
-```text
 0.2.0-alpha.7
 ```
-
-Alpha.7 is unreleased. Download, installation, checksum, and attestation
-examples below continue to refer to the immutable alpha.6 release until a new
-release is published.
 
 This software is **experimental**.
 
@@ -70,7 +60,7 @@ The public `0.2.0-alpha.3` predecessor additionally passed:
 - real-device read-only/idempotency planning.
 
 A fresh live ADD transaction has not yet been performed with the exact
-`0.2.0-alpha.6` release artifact itself. Treat this release as an alpha.
+`0.2.0-alpha.7` release artifact itself. Treat this release as an alpha.
 
 ## Tested platform
 
@@ -175,7 +165,7 @@ There is no hardcoded device-specific template identifier.
 On the currently tested Debian 11 amd64 environment:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0.alpha6_amd64.deb
+sudo apt install ./ipod-sync_0.2.0.alpha7_amd64.deb
 ```
 
 Then edit:
@@ -332,7 +322,7 @@ against downloaded artifacts with the GitHub CLI.
 Verify SLSA build provenance:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha7_amd64.deb \
   --repo pssingh21/open-ipod-sync
 ```
 
@@ -342,7 +332,7 @@ The same command can be used for the downloaded `.spdx.json`,
 Verify the SPDX 2.3 SBOM attestation attached to the Debian package:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha7_amd64.deb \
   --repo pssingh21/open-ipod-sync \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
