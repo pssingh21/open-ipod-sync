@@ -855,6 +855,554 @@ automated sanitizer smoke test because starting it can initiate the real
 libimobiledevice sync protocol with a physically connected device. Device
 communication is therefore kept outside this automated security test.
 
+<!-- CI_SECURITY_HARDENING_SUMMARY_BEGIN -->
+## CI, security, privacy, reproducibility, and release integrity
+
+`open-ipod-sync` treats CI as part of the security model. The pipeline does
+much more than compile a Debian package: it verifies source-library safety,
+package integrity, privacy boundaries, native-code hardening,
+reproducibility, provenance, and release eligibility.
+
+### CI pipeline
+
+The main CI workflow contains the following release-critical jobs.
+
+#### Public source sanity — Python 3.9
+
+This job runs repository-level safety and policy checks, including:
+
+- Python/source validation;
+- source-path security tests;
+- strict read-only source-library invariants;
+- privacy-boundary tests;
+- native ELF hardening checks;
+- native sanitizer coverage where runtime execution is safe;
+- deterministic source-archive tests;
+- reproducibility-claim scope tests;
+- workflow-security policy checks; and
+- checks that CI validation does not leave unexpected source-tree changes.
+
+#### Debian 11 package build + audit
+
+The canonical package build runs in the pinned Debian 11 build environment.
+
+It:
+
+- builds the Debian package;
+- audits package layout and metadata;
+- verifies runtime dependencies;
+- verifies file permissions and executable layout;
+- checks configuration-file handling;
+- checks native ELF security properties;
+- scans package/privacy boundaries;
+- generates an SPDX SBOM;
+- generates provenance metadata;
+- generates the canonical `SHA256SUMS`; and
+- uploads only the expected audited CI artifact set.
+
+The audited public CI artifact bundle contains:
+
+- `ipod-sync_*.deb`;
+- `ipod-sync_*.spdx.json`;
+- `PROVENANCE.json`; and
+- `SHA256SUMS`.
+
+Internal reproducibility evidence is not silently added to this public artifact
+contract.
+
+#### Debian 11 reproducibility gate
+
+The reproducibility gate independently reconstructs the package from a
+deterministic archive of the committed Git object.
+
+It verifies that:
+
+- repeated source-archive generation is byte-for-byte deterministic;
+- the archive identifies the expected Git commit;
+- the archive contains no `.git` metadata;
+- the extracted source contains no `.git` metadata;
+- Git execution is disabled during the extracted-source rebuild;
+- source timestamps preserve the commit-derived `SOURCE_DATE_EPOCH`;
+- comparison builds use different filesystem paths;
+- comparison builds use different `HOME` directories;
+- comparison builds use different `TMPDIR` directories;
+- timezone differences do not affect output;
+- locale differences do not affect output;
+- Python hash-seed differences do not affect output;
+- umask differences do not affect output;
+- synthetic user identity differences do not affect output;
+- build-parallelism differences do not affect output;
+- the actual rebuild runs with socket/network syscalls denied by the kernel;
+- the ambient process environment is replaced using `env -i`;
+- executable lookup is limited to a declared Debian-owned toolchain;
+- developer-local executable paths are excluded;
+- both builders record identical toolchain identities;
+- both builders record identical build-material identities; and
+- the complete supply-chain bundles are byte-for-byte identical.
+
+The byte comparison covers:
+
+- the Debian package;
+- SPDX SBOM;
+- provenance metadata; and
+- `SHA256SUMS`.
+
+The normal checkout build is also compared against the isolated
+source-archive build so the hardened reproducibility path cannot silently
+produce a different package.
+
+#### Debian 11 package lifecycle
+
+The lifecycle job operates on the already-audited Debian package.
+
+It validates installation and package lifecycle behavior using the intended
+runtime dependency environment.
+
+#### Ubuntu host compatibility
+
+Host compatibility is validated on:
+
+- Ubuntu 24.04; and
+- Ubuntu 26.04.
+
+This keeps package reproducibility separate from runtime host compatibility.
+
+#### GitHub artifact attestations
+
+GitHub artifact attestations are generated for the audited supply-chain
+artifacts.
+
+They provide an independently verifiable link between an artifact and the
+GitHub repository/workflow execution that produced it.
+
+---
+
+### Workflow and dependency security
+
+GitHub Actions workflows are treated as privileged code.
+
+The repository includes:
+
+- a dedicated workflow-security policy checker;
+- an allowlist of permitted GitHub Actions;
+- full commit-SHA pinning for Actions instead of floating tags;
+- CODEOWNERS coverage for security-sensitive paths;
+- Dependabot configuration;
+- CodeQL analysis;
+- pull-request dependency review;
+- GitHub secret scanning;
+- GitHub push protection; and
+- a protected release environment with a required reviewer.
+
+Workflow-policy checks run in CI so workflow changes cannot silently introduce
+unapproved Actions or weaken the SHA-pinning policy.
+
+---
+
+### Strict read-only source-library security
+
+A fundamental invariant of `open-ipod-sync` is:
+
+> The source music library is read-only.
+
+This applies to local directories and NAS-hosted libraries.
+
+No dry run, apply operation, recovery operation, hashing operation, media
+probe, candidate generation, rollback path, state-management operation, or
+transcoding workflow may write to the source tree.
+
+Source-path hardening includes:
+
+- rejecting a source root that is itself a symlink;
+- no-follow traversal;
+- rejecting file symlinks;
+- rejecting directory symlinks;
+- rejecting internal symlinks;
+- rejecting external symlinks;
+- rejecting broken symlinks;
+- rejecting FIFOs;
+- rejecting Unix sockets;
+- rejecting block devices;
+- rejecting character devices;
+- rejecting other unexpected special filesystem nodes;
+- supporting ordinary nested source directories;
+- deterministic traversal ordering;
+- containment validation;
+- path-component revalidation;
+- file identity revalidation around probing;
+- file identity revalidation around hashing; and
+- subprocess argument arrays instead of shell interpolation.
+
+The source library is never used for:
+
+- application state;
+- caches;
+- temporary files;
+- generated metadata;
+- sidecars;
+- transcoded output;
+- rollback state; or
+- recovery state.
+
+---
+
+### Native-code hardening
+
+Native helpers are built with hardened compiler and linker settings,
+including:
+
+- stack-protector hardening;
+- `_FORTIFY_SOURCE`;
+- PIE;
+- RELRO;
+- immediate symbol binding;
+- non-executable stack enforcement;
+- format-security checks;
+- reproducible file/debug/macro prefix mapping; and
+- strict warning flags.
+
+CI verifies the resulting ELF properties rather than relying only on the
+compiler command line.
+
+Native-code coverage also includes ASan and UBSan builds.
+
+Runtime sanitizer execution is limited to code paths that are safe to execute
+without entering a real device-sync protocol. The device-sync envelope is
+compiled with sanitizer instrumentation but deliberately not executed during
+the sanitizer test.
+
+---
+
+### Artifact privacy boundary
+
+Artifacts are scanned before crossing public CI or release boundaries.
+
+The canonical privacy scanner checks ordinary files and supported archives for
+sensitive information including:
+
+- private home-directory paths;
+- private/RFC1918 network addresses;
+- credentials and token-like values;
+- private keys;
+- Apple device identifiers;
+- pairing records;
+- legacy device fingerprints; and
+- other project-defined private patterns.
+
+The scanner:
+
+- fails closed;
+- reports findings in redacted form;
+- inspects supported archives; and
+- does not follow arbitrary symlinks while traversing inputs.
+
+Privacy scanning is applied to relevant:
+
+- source validation;
+- Debian package contents;
+- CI bundles;
+- reproducibility artifacts;
+- source archives; and
+- release-boundary artifacts.
+
+Checksum-sidecar generation is also designed to contain relative artifact
+names rather than leaking private absolute build paths.
+
+---
+
+### Deterministic committed-source archive
+
+Independent rebuilds do not trust the mutable CI checkout as their source.
+
+CI creates a deterministic tar archive directly from the committed Git object.
+
+Tests verify:
+
+- repeated generation is byte-for-byte identical;
+- embedded Git commit identity is correct;
+- `.git` metadata is absent;
+- required build sources are present;
+- commit-derived timestamps are preserved; and
+- required executable modes are preserved.
+
+Because the archive comes directly from the committed Git object, dirty or
+untracked files cannot silently become rebuild inputs.
+
+---
+
+### Rebuild without Git metadata
+
+The independent comparison build runs from the extracted source archive, not a
+Git checkout.
+
+The extracted source contains no `.git` metadata.
+
+A deliberately failing `git` executable is inserted into the isolated build
+environment. Any unexpected attempt to invoke Git therefore fails instead of
+silently depending on repository metadata.
+
+`SOURCE_DATE_EPOCH` remains deterministic through the source archive timestamp
+fallback.
+
+---
+
+### Environment-variance reproducibility
+
+Two independent comparison builders intentionally vary values that commonly
+cause accidental non-reproducibility.
+
+The differing inputs include:
+
+- extraction/build path;
+- `HOME`;
+- `TMPDIR`;
+- timezone;
+- locale;
+- `PYTHONHASHSEED`;
+- umask;
+- synthetic `USER`;
+- synthetic `LOGNAME`; and
+- build parallelism.
+
+Despite these differences, both builders must produce byte-identical
+supply-chain outputs.
+
+---
+
+### Kernel-enforced network isolation
+
+Dependency acquisition is separated from the actual comparison build.
+
+After the pinned Debian environment has been prepared, the comparison build is
+executed through `network-deny-exec`.
+
+Before starting the build it:
+
+- rejects socket-backed standard descriptors;
+- closes inherited non-standard file descriptors;
+- enables `PR_SET_NO_NEW_PRIVS`; and
+- installs a Linux seccomp filter.
+
+The filter denies socket/network syscalls with `EPERM`.
+
+Because seccomp restrictions are inherited by child processes, the protection
+also applies to build subprocesses and the metadata-generation process.
+
+Tests explicitly verify that IPv4 socket creation fails under this policy.
+
+This is stronger than simply relying on proxy variables or checking that
+`curl` and `wget` are absent from the build script.
+
+---
+
+### Empty inherited build environment
+
+The independent builders use:
+
+```text
+env -i
+```
+
+Only explicitly selected environment variables are passed to the build.
+
+This prevents unrelated values from the runner, login session, shell,
+developer machine, or CI host from silently influencing the independent
+rebuild.
+
+---
+
+### Declared Debian-owned toolchain
+
+The comparison build does not inherit the runner's normal `PATH`.
+
+A generated toolchain view exposes only declared commands required by the
+build.
+
+Every declared executable:
+
+- must resolve below `/bin`, `/sbin`, `/usr/bin`, or `/usr/sbin`;
+- must resolve to a regular executable;
+- must be executable;
+- must have a Debian package owner;
+- records its owning package; and
+- records the installed package version.
+
+The policy understands Debian merged-`/usr` aliases. For example,
+`/usr/bin/bash` can correctly map to package metadata recorded as `/bin/bash`.
+
+Developer-local executable roots such as:
+
+- `/usr/local`;
+- home directories;
+- `/opt`; and
+- temporary directories
+
+are excluded from command lookup.
+
+Tests inject hostile fake tools into the ambient `PATH` and verify that those
+executables do not enter the declared toolchain.
+
+Both independent builders must produce byte-identical toolchain manifests.
+
+---
+
+### Recorded build materials
+
+Each independent builder produces a canonical build-material manifest.
+
+The manifest records:
+
+- source commit;
+- `SOURCE_DATE_EPOCH`;
+- source-archive SHA-256;
+- Debian snapshot identity;
+- pinned Debian base-image digest;
+- Debian architecture;
+- Debian version;
+- installed build-package names and versions;
+- relevant pkg-config modules and versions; and
+- compiler, linker, binutils, packaging, Python, gettext, make, and related
+  tool versions.
+
+Both isolated builders must produce byte-identical material manifests before
+their output comparison is accepted.
+
+This makes important build inputs inspectable rather than treating the CI
+environment as an opaque black box.
+
+---
+
+### Pinned Debian acquisition environment
+
+The Debian build jobs use:
+
+- Debian 11 pinned by container-image digest; and
+- package repositories pinned to a dated Debian Snapshot.
+
+The model intentionally separates:
+
+1. **dependency acquisition**
+   - the pinned container is obtained;
+   - the pinned Debian Snapshot is configured;
+   - declared dependencies are installed;
+
+2. **independent comparison build**
+   - dependencies are already installed;
+   - the deterministic source archive is extracted;
+   - networking is kernel-denied;
+   - the declared toolchain is used;
+   - outputs are compared.
+
+The project therefore does not claim that the entire GitHub Actions job never
+uses networking.
+
+Instead, it verifies that the **actual independent rebuild does not require
+network access**.
+
+---
+
+### Reproducible supply-chain metadata
+
+Reproducibility applies to the complete audited bundle, not only the `.deb`.
+
+Independent builders generate and compare:
+
+- Debian package;
+- SPDX SBOM;
+- `PROVENANCE.json`; and
+- `SHA256SUMS`.
+
+All must match byte-for-byte.
+
+This also verifies that SBOM and provenance generation is deterministic under
+the tested environment variance.
+
+---
+
+### Package audit and configuration management
+
+The Debian package audit validates the finished package rather than trusting
+only the commands that produced it.
+
+The audit covers package structure, dependencies, native hardening,
+configuration behavior, privacy boundaries, and other package invariants.
+
+Runtime `config.env` is managed by package installation behavior rather than
+being treated as an uncontrolled build artifact.
+
+---
+
+### Safe build-time temporary files
+
+Build-time compiler probes use private `mktemp` paths below `TMPDIR` rather
+than fixed predictable filenames.
+
+This avoids relying on a shared hard-coded `/tmp` filename and allows the
+reproducibility matrix to vary `TMPDIR` safely.
+
+---
+
+### Release integrity
+
+The release process layers multiple independent controls:
+
+1. public source/policy validation;
+2. strict source-path safety;
+3. package build and audit;
+4. privacy scanning;
+5. deterministic committed-source reconstruction;
+6. independent environment-variance rebuilding;
+7. kernel-enforced network isolation;
+8. declared Debian-owned tool resolution;
+9. recorded build-material identities;
+10. byte-for-byte supply-chain bundle comparison;
+11. package lifecycle validation;
+12. supported-host compatibility;
+13. release workflow gating;
+14. cryptographic checksums;
+15. SBOM and provenance metadata; and
+16. GitHub artifact attestations.
+
+These controls make release artifacts substantially easier to inspect,
+reproduce, and independently verify.
+
+---
+
+### Scope of the build-isolation guarantee
+
+The verified property is a:
+
+**reproducible, network-isolated, material-recorded,
+tool-resolution-confined build.**
+
+The current reproducibility environment does **not** claim a complete
+filesystem sandbox.
+
+Comparison-build processes can still:
+
+- read operating-system files supplied by the pinned Debian environment; and
+- execute an explicitly named absolute system executable if build logic
+  deliberately requests it.
+
+System headers, shared libraries, and operating-system files are trusted
+through:
+
+- the pinned Debian image digest;
+- the pinned Debian Snapshot;
+- installed package identities and versions;
+- recorded pkg-config identities;
+- recorded tool identities; and
+- byte-for-byte output comparison.
+
+They are not individually content-addressed at every filesystem read.
+
+Landlock is not required by the Debian 11 baseline because the supported Linux
+5.10 environment does not expose the required Landlock interface.
+
+Keeping this boundary explicit prevents CI documentation from claiming a
+stronger filesystem-isolation property than the project actually verifies.
+<!-- CI_SECURITY_HARDENING_SUMMARY_END -->
+
 <!-- PR4_BUILD_ISOLATION_SCOPE_BEGIN -->
 ### Build isolation scope
 
