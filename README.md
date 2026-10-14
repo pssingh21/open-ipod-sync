@@ -289,8 +289,40 @@ CI package artifacts also include:
   component hashes;
 - a `SHA256SUMS` file covering the Debian package, SBOM, and provenance.
 
-The project provenance document is deterministic build metadata. It is not
-currently a cryptographically signed SLSA/in-toto attestation.
+The project `PROVENANCE.json` document is deterministic build metadata. It is
+not itself a cryptographically signed SLSA/in-toto attestation.
+
+After all package, reproducibility, and lifecycle gates pass on a push to
+`main`, GitHub Actions additionally creates cryptographically signed artifact
+attestations using GitHub's Sigstore-backed attestation service:
+
+- SLSA build-provenance attestations cover the Debian package, SPDX SBOM,
+  `PROVENANCE.json`, and `SHA256SUMS`;
+- an SPDX 2.3 SBOM attestation binds the generated SBOM to the Debian package.
+
+The attestations are associated with this GitHub repository and can be verified
+against downloaded artifacts with the GitHub CLI.
+
+Verify SLSA build provenance:
+
+```bash
+gh attestation verify ./ipod-sync_0.2.0.alpha5_amd64.deb \
+  --repo pssingh21/open-ipod-sync
+```
+
+The same command can be used for the downloaded `.spdx.json`,
+`PROVENANCE.json`, and `SHA256SUMS` artifacts.
+
+Verify the SPDX 2.3 SBOM attestation attached to the Debian package:
+
+```bash
+gh attestation verify ./ipod-sync_0.2.0.alpha5_amd64.deb \
+  --repo pssingh21/open-ipod-sync \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+Artifact attestations are generated only by successful `main`-branch CI builds;
+pull-request workflows do not receive the attestation-signing permissions.
 
 ## Known limitations
 
