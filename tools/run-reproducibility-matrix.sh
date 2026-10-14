@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+ROOT="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &&
+    pwd
+)"
+
 usage()
 {
     cat >&2 <<'EOF'
@@ -53,6 +58,7 @@ for cmd in \
     diff \
     dpkg-deb \
     find \
+    gcc \
     grep \
     mkdir \
     mktemp \
@@ -89,6 +95,74 @@ mkdir -p \
     "$OUTPUT_ROOT/builder-b"
 
 SYSTEM_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+echo
+echo "===== BUILD KERNEL NETWORK-DENY HELPER ====="
+
+NETWORK_POLICY_DIR="$OUTPUT_ROOT/.network-isolation"
+NETWORK_HELPER="$NETWORK_POLICY_DIR/network-deny-exec"
+
+mkdir -p "$NETWORK_POLICY_DIR"
+
+gcc \
+    -O2 \
+    -g0 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -std=c11 \
+    "$ROOT/tools/network-deny-exec.c" \
+    -o "$NETWORK_HELPER"
+
+[[ -x "$NETWORK_HELPER" ]] || {
+    echo "ERROR: network-deny helper was not built" >&2
+    exit 1
+}
+
+echo "network-deny helper build: PASS"
+
+
+echo
+echo "===== VERIFY ORDINARY EXECUTION UNDER SECCOMP ====="
+
+"$NETWORK_HELPER" \
+    /bin/sh \
+    -c 'test "x$1" = xPASS' \
+    sh \
+    PASS
+
+echo "ordinary subprocess execution: PASS"
+
+
+echo
+echo "===== VERIFY NETWORK SOCKET CREATION IS DENIED ====="
+
+"$NETWORK_HELPER" \
+    python3 \
+    -c '
+import errno
+import socket
+import sys
+
+try:
+    socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+except OSError as exc:
+    if exc.errno != errno.EPERM:
+        raise SystemExit(
+            f"wrong socket failure errno: {exc.errno}"
+        )
+    print("AF_INET socket creation: DENIED (EPERM)")
+else:
+    raise SystemExit(
+        "ERROR: AF_INET socket creation unexpectedly succeeded"
+    )
+'
+
+echo "kernel network denial self-test: PASS"
 
 WORK_A="$(
     mktemp \
@@ -202,7 +276,7 @@ NO_GIT
 
         cd "$source_root"
 
-        env -i \
+        "$NETWORK_HELPER" /usr/bin/env -i \
             PATH="$fake_bin:$SYSTEM_PATH" \
             HOME="$home_dir" \
             TMPDIR="$tmp_dir" \
@@ -251,7 +325,7 @@ NO_GIT
     echo
     echo "===== GENERATE $label SUPPLY-CHAIN METADATA ====="
 
-    env -i \
+    "$NETWORK_HELPER" /usr/bin/env -i \
         PATH="$fake_bin:$SYSTEM_PATH" \
         HOME="$home_dir" \
         TMPDIR="$tmp_dir" \
@@ -404,6 +478,15 @@ echo "===== VERIFY BOTH CHECKSUM MANIFESTS ====="
     sha256sum -c SHA256SUMS
 )
 
+
+echo
+echo "===== NETWORK ISOLATION SUMMARY ====="
+echo "socket/network syscalls: KERNEL-DENIED BY SECCOMP"
+echo "inherited non-stdio fds: CLOSED"
+echo "socket-backed stdio:     REFUSED"
+echo "builder A:               ISOLATED"
+echo "builder B:               ISOLATED"
+echo "metadata A/B:            ISOLATED"
 
 echo
 echo "========================================================================"
