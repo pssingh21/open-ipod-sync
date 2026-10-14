@@ -149,7 +149,7 @@ There is no hardcoded device-specific template identifier.
 On the currently tested Debian 11 amd64 environment:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0~alpha5_amd64.deb
+sudo apt install ./ipod-sync_0.2.0.alpha5_amd64.deb
 ```
 
 Then edit:
