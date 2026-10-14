@@ -182,7 +182,7 @@ usage:
   ipod-sync doctor
   ipod-sync mount-ro
   ipod-sync unmount
-  ipod-sync plan
+  ipod-sync plan [--json]
   ipod-sync sync --apply
   ipod-sync recover-check
   ipod-sync recover

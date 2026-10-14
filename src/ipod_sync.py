@@ -2504,6 +2504,66 @@ def build_candidate(source: Path, mount: Path, run_dir: Path) -> Candidate | Non
         return None
     return build_generic_candidate(mount, tracks, run_dir)
 
+def plan_json_document(
+    source: Path,
+    mount: Path,
+    run_dir: Path,
+    candidate: Candidate | None,
+) -> dict[str, Any]:
+    """Return the stable machine-readable dry-run plan schema."""
+    tracks = candidate.tracks if candidate is not None else []
+
+    media_bytes = sum(
+        int(t.output_size if t.output_size is not None else t.source_size)
+        for t in tracks
+    )
+
+    return {
+        "schema_version": 1,
+        "app": APP,
+        "version": VERSION,
+        "mode": (
+            candidate.mode
+            if candidate is not None
+            else "generic-incremental-add"
+        ),
+        "source": str(source),
+        "mount": str(mount),
+        "device_write_authorized": False,
+        "source_writes": False,
+        "device_writes": False,
+        "host_staging_directory": str(run_dir),
+        "add_tracks": len(tracks),
+        "media_bytes": media_bytes,
+        "candidate_sha256": (
+            candidate_hashes(candidate)
+            if candidate is not None
+            else {}
+        ),
+        "tracks": [
+            {
+                "source_rel": t.source_rel,
+                "title": t.title,
+                "source_sha256": t.sha256,
+                "source_size": t.source_size,
+                "output_size": (
+                    t.output_size
+                    if t.output_size is not None
+                    else t.source_size
+                ),
+                "output_sha256": t.output_sha256,
+                "duration_ms": t.duration_ms,
+                "bitrate_kbps": t.bitrate_kbps,
+                "sample_rate_hz": t.sample_rate_hz,
+                "direct_mp3": t.direct_mp3,
+                "device_rel": t.device_rel,
+                "apple_path": t.apple_path,
+            }
+            for t in tracks
+        ],
+    }
+
+
 def _doctor_row(label: str, status: str, detail: str = ""):
     suffix = f" ({detail})" if detail else ""
     print(f"  {label + ':':<30} {status}{suffix}")
@@ -2701,8 +2761,17 @@ def main(argv=None) -> int:
         "--doctor", action="store_true",
         help="read-only environment, source-safety, device, and recovery diagnostics",
     )
+    ap.add_argument(
+        "--json", action="store_true",
+        help="emit the dry-run synchronization plan as JSON only",
+    )
     ap.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     args = ap.parse_args(argv)
+
+    if args.json and (args.apply or args.doctor or args.recover or args.recover_check):
+        raise SyncError(
+            "--json is supported only for dry-run planning"
+        )
 
     if args.doctor and (args.apply or args.recover or args.recover_check):
         raise SyncError(
@@ -2741,10 +2810,12 @@ def main(argv=None) -> int:
         raise SyncError(f"source directory missing: {source}")
     source_guard = require_source_ro(source)
     assert_no_write_roots_on_source(source_guard, mount)
-    print(
-        f"source write barrier: PASS (kernel RO; {source_guard.fstype} "
-        f"mount {source_guard.mountpoint})"
-    )
+
+    if not args.json:
+        print(
+            f"source write barrier: PASS (kernel RO; {source_guard.fstype} "
+            f"mount {source_guard.mountpoint})"
+        )
 
     lp = live_paths(mount)
     for name in ("Library.itdb", "Dynamic.itdb", "Locations.itdb", "Extras.itdb"):
@@ -2757,17 +2828,48 @@ def main(argv=None) -> int:
     run_dir.mkdir(parents=True, exist_ok=False)
 
     recheck_source_guard(source_guard)
-    candidate = build_candidate(source, mount, run_dir)
+
+    # Human planning currently emits progress from several helper functions.
+    # JSON mode suppresses those messages so stdout contains exactly one JSON
+    # document. Errors continue to propagate normally and are rendered on
+    # stderr by the top-level exception handler.
+    with contextlib.ExitStack() as stack:
+        if args.json:
+            sink = stack.enter_context(open(os.devnull, "w", encoding="utf-8"))
+            stack.enter_context(contextlib.redirect_stdout(sink))
+
+        candidate = build_candidate(source, mount, run_dir)
+
+        if candidate is not None:
+            validate_tracks_source(candidate.tracks, source)
+            validate_candidate(candidate, mount, run_dir)
+            validate_destinations_absent(candidate.tracks, mount)
+            write_run_manifest(run_dir, candidate, args.apply)
+
     if candidate is None:
-        print("No new songs found. Nothing to do.")
+        if args.json:
+            print(json.dumps(
+                plan_json_document(source, mount, run_dir, None),
+                indent=2,
+                sort_keys=True,
+            ))
+        else:
+            print("No new songs found. Nothing to do.")
         return 0
 
-    validate_tracks_source(candidate.tracks, source)
-    validate_candidate(candidate, mount, run_dir)
-    validate_destinations_absent(candidate.tracks, mount)
-    write_run_manifest(run_dir, candidate, args.apply)
+    media_bytes = sum(
+        int(t.output_size if t.output_size is not None else t.source_size)
+        for t in candidate.tracks
+    )
 
-    media_bytes = sum(int(t.output_size or t.source_size) for t in candidate.tracks)
+    if args.json:
+        print(json.dumps(
+            plan_json_document(source, mount, run_dir, candidate),
+            indent=2,
+            sort_keys=True,
+        ))
+        return 0
+
     print()
     print(f"ADD tracks:       {len(candidate.tracks)}")
     print(f"media bytes:      {media_bytes}")

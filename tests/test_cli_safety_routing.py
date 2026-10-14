@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -613,6 +614,197 @@ with tempfile.TemporaryDirectory() as td:
 
     assert rc == 1
     assert forbidden_calls == []
+
+
+
+# ---------------------------------------------------------------------------
+# 11. --json emits exactly one parseable dry-run plan and never applies.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+
+    source.mkdir()
+    mount.mkdir()
+
+    candidate = basic_candidate(source, root)
+    events = []
+
+    patches = common_normal_patches(
+        root, source, mount, events, candidate
+    )
+
+    active = root / "active.json"
+    patches["ACTIVE_TXN"] = active
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "JSON plan reached a write-capable operation"
+        )
+
+    patches["apply_transaction"] = forbidden
+    patches["remount_ifuse"] = forbidden
+    patches["recover_transaction"] = forbidden
+    patches["SyncEnvelope"] = forbidden
+
+    source_before = {
+        str(p.relative_to(source)): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+
+    mount_before = {
+        str(p.relative_to(mount)): p.read_bytes()
+        for p in mount.rglob("*")
+        if p.is_file()
+    }
+
+    out = io.StringIO()
+
+    with patched(**patches):
+        with redirect_stdout(out):
+            rc = m.main([
+                "--json",
+                "--source", str(source),
+                "--mount", str(mount),
+            ])
+
+    assert rc == 0
+
+    document = json.loads(out.getvalue())
+
+    assert document["schema_version"] == 1
+    assert document["app"] == m.APP
+    assert document["version"] == m.VERSION
+    assert document["mode"] == candidate.mode
+    assert document["source"] == str(source.resolve())
+    assert document["mount"] == str(mount.resolve())
+    assert document["device_write_authorized"] is False
+    assert document["source_writes"] is False
+    assert document["device_writes"] is False
+    assert document["add_tracks"] == 1
+    assert document["media_bytes"] == candidate.tracks[0].source_size
+    assert len(document["tracks"]) == 1
+
+    row = document["tracks"][0]
+
+    assert row["source_rel"] == "track.mp3"
+    assert row["title"] == "track"
+    assert row["source_sha256"] == candidate.tracks[0].sha256
+    assert row["output_sha256"] == candidate.tracks[0].output_sha256
+    assert row["device_rel"] == candidate.tracks[0].device_rel
+    assert row["direct_mp3"] is True
+
+    assert "build-candidate" in events
+    assert "validate-source" in events
+    assert "validate-candidate" in events
+    assert "validate-destinations" in events
+    assert "manifest:False" in events
+
+    assert not active.exists()
+
+    source_after = {
+        str(p.relative_to(source)): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+
+    mount_after = {
+        str(p.relative_to(mount)): p.read_bytes()
+        for p in mount.rglob("*")
+        if p.is_file()
+    }
+
+    assert source_after == source_before
+    assert mount_after == mount_before
+
+
+# ---------------------------------------------------------------------------
+# 12. --json no-change planning still emits a valid empty plan.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+
+    source.mkdir()
+    mount.mkdir()
+
+    events = []
+
+    class Guard:
+        fstype = "synthetic"
+        mountpoint = source
+
+    out = io.StringIO()
+
+    with patched(
+        RUN_ROOT=root / "runs",
+        ACTIVE_TXN=root / "active.json",
+        require_ifuse_mount=lambda path, writable=None:
+            events.append("mount-check"),
+        require_source_ro=lambda path:
+            events.append("source-ro") or Guard(),
+        assert_no_write_roots_on_source=lambda g, mnt:
+            events.append("source-isolation"),
+        sqlite_integrity=lambda path: "ok",
+        recheck_source_guard=lambda guard:
+            events.append("source-recheck"),
+        build_candidate=lambda s, mnt, run:
+            events.append("build-none") or None,
+        apply_transaction=lambda *args:
+            (_ for _ in ()).throw(
+                AssertionError("empty JSON plan called apply")
+            ),
+        remount_ifuse=lambda *args, **kwargs:
+            (_ for _ in ()).throw(
+                AssertionError("empty JSON plan remounted device")
+            ),
+    ):
+        with redirect_stdout(out):
+            rc = m.main([
+                "--json",
+                "--source", str(source),
+                "--mount", str(mount),
+            ])
+
+    assert rc == 0
+
+    document = json.loads(out.getvalue())
+
+    assert document["schema_version"] == 1
+    assert document["mode"] == "generic-incremental-add"
+    assert document["add_tracks"] == 0
+    assert document["media_bytes"] == 0
+    assert document["candidate_sha256"] == {}
+    assert document["tracks"] == []
+
+
+# ---------------------------------------------------------------------------
+# 13. --json cannot be combined with write/doctor/recovery modes.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+
+    for flag in (
+        "--apply",
+        "--doctor",
+        "--recover",
+        "--recover-check",
+    ):
+        expect_sync_error(
+            lambda flag=flag: m.main([
+                "--json",
+                flag,
+                "--source", str(root),
+                "--mount", str(root),
+            ]),
+            "--json is supported only for dry-run planning",
+        )
 
 
 print("CLI safety routing tests: PASS")
