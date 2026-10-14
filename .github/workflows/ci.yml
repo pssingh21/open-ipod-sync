@@ -237,6 +237,10 @@ jobs:
     container:
       image: debian:11
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Install Debian 11 build dependencies
         run: |
