@@ -731,7 +731,7 @@ jobs:
 
           ./tools/audit-deb.sh "${debs[0]}"
 
-      - name: Report runtime package-name compatibility
+      - name: Verify host-generated runtime dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -745,31 +745,135 @@ jobs:
             sort
           )
 
-          [[ "${#debs[@]}" -eq 1 ]]
+          [[ "${#debs[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one package" >&2
+            exit 1
+          }
+
+          DEPENDS="$(dpkg-deb -f "${debs[0]}" Depends)"
 
           echo "Generated package Depends:"
-          dpkg-deb -f "${debs[0]}" Depends
+          echo "$DEPENDS"
 
-          echo
-          echo "Host package-name availability:"
-          for package in \
-            libimobiledevice6 \
-            libimobiledevice-1.0-6 \
-            libplist3 \
-            libplist-2.0-4 \
+          python3 - \
+            "${{ matrix.os }}" \
+            "$DEPENDS" <<'PYDEP'
+import re
+import sys
+
+host = sys.argv[1]
+raw = sys.argv[2]
+
+names = []
+
+for group in raw.split(","):
+    token = group.strip()
+
+    if "|" in token:
+        raise SystemExit(
+            f"ERROR: unexpected alternative dependency: {token}"
+        )
+
+    name = re.split(r"\s|\(", token, maxsplit=1)[0]
+
+    if not name:
+        raise SystemExit(
+            f"ERROR: could not parse dependency: {token!r}"
+        )
+
+    names.append(name)
+
+print("dependency package names:")
+for name in names:
+    print(f"  {name}")
+
+common = {
+    "libplist-2.0-4",
+}
+
+if host == "ubuntu-24.04":
+    required = common | {
+        "libimobiledevice6",
+    }
+
+    forbidden = {
+        "libplist3",
+        "libimobiledevice-1.0-6",
+    }
+
+elif host == "ubuntu-26.04":
+    required = common | {
+        "libimobiledevice-1.0-6",
+    }
+
+    forbidden = {
+        "libplist3",
+        "libimobiledevice6",
+    }
+
+else:
+    raise SystemExit(
+        f"ERROR: unexpected host matrix member: {host}"
+    )
+
+missing = required - set(names)
+
+if missing:
+    raise SystemExit(
+        f"ERROR: missing host ABI dependencies: "
+        f"{sorted(missing)}"
+    )
+
+present_forbidden = forbidden & set(names)
+
+if present_forbidden:
+    raise SystemExit(
+        f"ERROR: stale distro-specific ABI dependencies: "
+        f"{sorted(present_forbidden)}"
+    )
+
+print(f"{host} generated ABI package names: PASS")
+PYDEP
+
+      - name: Install lifecycle runtime tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          sudo apt-get install -y --no-install-recommends \
             ifuse \
-            libimobiledevice-utils
-          do
-            echo
-            echo "--- $package ---"
+            libimobiledevice-utils \
+            usbmuxd \
+            ffmpeg
 
-            apt-cache policy "$package" 2>/dev/null || true
-          done
+      - name: Run host-built package lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          echo
-          echo "NOTE:"
-          echo "This step is diagnostic only."
-          echo "Binary-package installability is intentionally not asserted here."
+          mapfile -t debs < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print |
+            sort
+          )
+
+          [[ "${#debs[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one package for lifecycle" >&2
+            exit 1
+          }
+
+          sudo \
+            env \
+              PATH="$PATH" \
+              ./tools/test-package-lifecycle.sh \
+              "${debs[0]}"
+
+          echo "host-built package lifecycle: PASS"
 
       - name: Verify build did not modify tracked source
         shell: bash
