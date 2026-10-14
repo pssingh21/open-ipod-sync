@@ -52,10 +52,16 @@ done
 for mod in glib-2.0 gobject-2.0 sqlite3 libimobiledevice-1.0 libxml-2.0; do
   pkg-config --exists "$mod" || { echo "ERROR: missing development module: $mod" >&2; exit 1; }
 done
-if ! pkg-config --exists libplist && ! pkg-config --exists libplist-2.0; then
+if pkg-config --exists libplist; then
+  LIBPLIST_PKGCONFIG="libplist"
+elif pkg-config --exists libplist-2.0; then
+  LIBPLIST_PKGCONFIG="libplist-2.0"
+else
   echo "ERROR: missing libplist development pkg-config module" >&2
   exit 1
 fi
+
+echo "libplist pkg-config module: $LIBPLIST_PKGCONFIG"
 printf '#include <zlib.h>\nint main(void){return 0;}\n' | gcc -x c - -lz -o /tmp/ipod-sync-zlib-check
 rm -f /tmp/ipod-sync-zlib-check
 
@@ -69,6 +75,38 @@ RUNTIME_PREFIX="/usr/lib/ipod-sync/vendor/libgpod"
 rm -rf "$ROOT/build" "$ROOT/dist"
 mkdir -p "$BUILD/DEBIAN" "$BUILD/usr/bin" "$BUILD/usr/lib/ipod-sync/native" \
          "$BUILD/usr/lib/ipod-sync/ipodctl" "$BUILD/usr/share/doc/ipod-sync" "$ROOT/dist" "$LIBSRC"
+
+# libgpod 0.8.3's configure script requires the historical pkg-config module
+# name "libplist". Newer Debian/Ubuntu libplist development packages expose
+# the same library as "libplist-2.0". When only the newer module exists,
+# provide a build-local alias so the unmodified upstream configure check can
+# continue to enforce its normal version/dependency requirements.
+#
+# The compatibility directory lives outside the package payload and is never
+# installed.
+if [[ "$LIBPLIST_PKGCONFIG" == "libplist-2.0" ]]; then
+  LIBPLIST_PC_DIR="$(pkg-config --variable=pcfiledir libplist-2.0)"
+  LIBPLIST_PC_SOURCE="$LIBPLIST_PC_DIR/libplist-2.0.pc"
+
+  [[ -f "$LIBPLIST_PC_SOURCE" ]] || {
+    echo "ERROR: libplist-2.0 pkg-config file not found: $LIBPLIST_PC_SOURCE" >&2
+    exit 1
+  }
+
+  LIBPLIST_COMPAT_DIR="$ROOT/build/pkgconfig-compat"
+  mkdir -p "$LIBPLIST_COMPAT_DIR"
+
+  ln -s "$LIBPLIST_PC_SOURCE" "$LIBPLIST_COMPAT_DIR/libplist.pc"
+
+  export PKG_CONFIG_PATH="$LIBPLIST_COMPAT_DIR${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+  pkg-config --atleast-version=1.0 libplist || {
+    echo "ERROR: libplist-2.0 compatibility alias failed pkg-config validation" >&2
+    exit 1
+  }
+
+  echo "libplist pkg-config compatibility alias: libplist -> libplist-2.0"
+fi
 
 # Build libgpod from the captured modified source. Nothing from the historical
 # compiled prefix is reused, preventing development-home paths from leaking.
