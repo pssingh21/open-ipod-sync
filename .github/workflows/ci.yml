@@ -170,6 +170,11 @@ jobs:
           set -euo pipefail
           ./tools/public-sanity-check.sh
 
+      - name: Native ASan and UBSan gate
+        run: |
+          set -euo pipefail
+          ./tools/test-native-sanitizers.sh
+
       - name: Build Debian package
         run: |
           set -euo pipefail

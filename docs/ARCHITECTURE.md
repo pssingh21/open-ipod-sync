@@ -537,3 +537,92 @@ the matched secret or private value itself.
 A privacy scan failure prevents subsequent artifact upload or release
 publication. The configured source music filesystem is never used for staging
 or scanner state and remains subject to the kernel read-only source invariant.
+
+## Source path and native-code security boundaries
+
+The source filesystem is treated as an untrusted read-only input boundary even
+after the kernel read-only mount requirement has been established.
+
+Source enumeration does not use symlink-following file tests. Instead, the
+scanner walks directories without following links and classifies entries from
+non-following filesystem metadata.
+
+The source path policy is:
+
+```text
+configured source root
+        |
+        v
+root must be a real directory
+        |
+        v
+walk without following symlinks
+        |
+        +---- symlink ----------> REFUSE
+        |
+        +---- special file -----> REFUSE
+        |
+        +---- real directory ---> recurse
+        |
+        +---- regular file -----> classify media type
+                                      |
+                                      v
+                              pre-consumption recheck
+                                      |
+                                      v
+                                media processing
+                                      |
+                                      v
+                              pre-write revalidation
+```
+
+All path components between the source root and a track must remain ordinary
+directories, and the leaf must remain a regular file. Source identity is
+rechecked around external media probing and again before an authorized device
+write. Size and SHA-256 verification remain part of the existing source
+integrity gate.
+
+This rejects both internal and external symlinks rather than attempting to
+distinguish safe from unsafe link targets. The result is a smaller and more
+deterministic source-resolution model with no symlink traversal.
+
+Hostile filename regression tests verify that command-looking names remain
+ordinary argv values. Application media subprocesses are not invoked through
+`shell=True`.
+
+### Native-code boundary
+
+The shipped `sync-envelope` executable and runtime-generated C helpers use
+explicit compiler/linker hardening. The package build and package audit both
+verify the shipped ELF for:
+
+```text
+PIE
+GNU_RELRO
+BIND_NOW
+non-executable GNU_STACK
+```
+
+CI additionally compiles native project code with AddressSanitizer and
+UndefinedBehaviorSanitizer.
+
+The sanitizer boundary intentionally distinguishes between compile-time
+instrumentation and safe runtime execution:
+
+```text
+sync-envelope.c
+    -> ASan/UBSan build
+    -> no automated execution
+       because execution enters the device sync protocol
+
+sign-cdb.c + rijndael.c
+    -> ASan/UBSan build
+    -> safe invalid-input/runtime smoke coverage
+
+rijndael.c
+    -> dedicated sanitizer smoke execution
+```
+
+This preserves security-test coverage without allowing CI or a local validation
+run to initiate an iPod sync session merely to exercise sanitizer
+instrumentation.

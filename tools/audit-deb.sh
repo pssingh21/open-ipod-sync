@@ -206,6 +206,10 @@ done
 echo "ELF stripping: PASS"
 
 echo
+echo "===== NATIVE ELF HARDENING ====="
+"$ROOT/tools/check-elf-hardening.sh" "$SYNC_ELF"
+
+echo
 echo "===== RUNTIME LINKAGE ====="
 
 for elf in "$SYNC_ELF" "$LIBGPOD_ELF"; do

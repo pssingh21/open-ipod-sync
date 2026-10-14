@@ -65,6 +65,11 @@ echo "libplist pkg-config module: $LIBPLIST_PKGCONFIG"
 printf '#include <zlib.h>\nint main(void){return 0;}\n' | gcc -x c - -lz -o /tmp/ipod-sync-zlib-check
 rm -f /tmp/ipod-sync-zlib-check
 
+command -v readelf >/dev/null 2>&1 || {
+  echo "ERROR: missing build command: readelf (install binutils)" >&2
+  exit 1
+}
+
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || echo "WARNING: only Debian 11 amd64 has been validated so far; building for $ARCH"
 VER="0.2.0~alpha7"
@@ -151,15 +156,37 @@ install -m0644 "$ROOT/native/rijndael.c" "$BUILD/usr/lib/ipod-sync/native/rijnda
 install -m0644 "$ROOT/native/rijndael.h" "$BUILD/usr/lib/ipod-sync/native/rijndael.h"
 
 # Device-generic sync envelope.
-gcc -O2 -g0 -Wall -Wextra \
+#
+# This is shipped executable native code. Keep production hardening explicit
+# instead of relying on distribution/compiler defaults.
+gcc \
+  -O2 \
+  -g0 \
+  -Wall \
+  -Wextra \
+  -Wformat=2 \
+  -Wformat-security \
+  -Werror=format-security \
+  -fstack-protector-strong \
+  -D_FORTIFY_SOURCE=2 \
+  -fPIE \
+  -fno-common \
   -ffile-prefix-map="$ROOT"=/usr/src/ipod-sync \
   -fdebug-prefix-map="$ROOT"=/usr/src/ipod-sync \
   -fmacro-prefix-map="$ROOT"=/usr/src/ipod-sync \
   "$ROOT/native/sync-envelope.c" \
   $(pkg-config --cflags --libs libimobiledevice-1.0) \
+  -Wl,-z,relro \
+  -Wl,-z,now \
+  -Wl,-z,noexecstack \
+  -pie \
   -o "$BUILD/usr/lib/ipod-sync/native/sync-envelope"
 strip --strip-unneeded "$BUILD/usr/lib/ipod-sync/native/sync-envelope"
 chmod 0755 "$BUILD/usr/lib/ipod-sync/native/sync-envelope"
+
+"$ROOT/tools/check-elf-hardening.sh" \
+  "$BUILD/usr/lib/ipod-sync/native/sync-envelope"
+
 
 cat > "$BUILD/usr/bin/ipod-sync" <<'WRAP'
 #!/bin/bash

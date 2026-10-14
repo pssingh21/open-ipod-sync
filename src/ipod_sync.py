@@ -44,6 +44,7 @@ import os
 import shutil
 import selectors
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -233,7 +234,27 @@ def _path_within(path: Path, root: Path) -> bool:
 
 def require_source_ro(source: Path) -> SourceGuard:
     """Require the source itself to be a dedicated kernel read-only mount."""
-    source = source.resolve()
+    source = Path(os.path.abspath(source))
+
+    try:
+        source_st = source.lstat()
+    except OSError as exc:
+        raise SyncError(
+            f"cannot stat source root: {source}: {exc}"
+        ) from exc
+
+    if stat.S_ISLNK(source_st.st_mode):
+        raise SyncError(
+            f"SOURCE WRITE BARRIER FAILED: source root must not be a symlink: "
+            f"{source}"
+        )
+
+    if not stat.S_ISDIR(source_st.st_mode):
+        raise SyncError(
+            f"source root is not a directory: {source}"
+        )
+
+    source = source.resolve(strict=True)
     best = None
     for row in read_mounts():
         _, mp, _, _ = row
@@ -428,26 +449,255 @@ def probe_audio(path: Path) -> tuple[int, int, int]:
     bitrate = int((getattr(info, "bitrate", 128000) or 128000) / 1000)
     return duration, max(1, bitrate), max(1, sr)
 
-def scan_source(source: Path) -> list[Track]:
-    tracks = []
-    for p in sorted(x for x in source.rglob("*") if x.is_file()):
-        ext = p.suffix.lower()
-        if ext not in SUPPORTED_DIRECT and ext not in TRANSCODE_EXTS:
+def _absolute_source_path(path: Path) -> Path:
+    """Normalize dot/dot-dot components without resolving symlinks."""
+    return Path(
+        os.path.abspath(
+            os.fspath(path)
+        )
+    )
+
+
+def _source_root_without_symlinks(source: Path) -> Path:
+    """Return an absolute real directory path without following a root link."""
+    root = _absolute_source_path(source)
+
+    try:
+        st = root.lstat()
+    except OSError as exc:
+        raise SyncError(
+            f"cannot stat source root: {root}: {exc}"
+        ) from exc
+
+    if stat.S_ISLNK(st.st_mode):
+        raise SyncError(
+            f"source root symlink forbidden: {root}"
+        )
+
+    if not stat.S_ISDIR(st.st_mode):
+        raise SyncError(
+            f"source root is not a directory: {root}"
+        )
+
+    return root
+
+
+def _source_relative_path(path: Path, root: Path) -> Path:
+    """Return a lexical path below root; never resolve through links."""
+    root_abs = _absolute_source_path(root)
+    path_abs = _absolute_source_path(path)
+
+    try:
+        rel = path_abs.relative_to(root_abs)
+    except ValueError as exc:
+        raise SyncError(
+            f"source escaped configured root: {path}"
+        ) from exc
+
+    if any(part in ("", ".", "..") for part in rel.parts):
+        raise SyncError(
+            f"unsafe source relative path: {path}"
+        )
+
+    return rel
+
+
+def _require_regular_source_path(
+    path: Path,
+    root: Path,
+) -> os.stat_result:
+    """Require every path component to be non-symlink and the leaf regular."""
+    root_abs = _source_root_without_symlinks(root)
+    rel = _source_relative_path(path, root_abs)
+
+    if not rel.parts:
+        raise SyncError(
+            f"source track resolves to source root: {path}"
+        )
+
+    current = root_abs
+
+    for index, part in enumerate(rel.parts):
+        current = current / part
+
+        try:
+            st = current.lstat()
+        except OSError as exc:
+            raise SyncError(
+                f"cannot lstat source path: {current}: {exc}"
+            ) from exc
+
+        if stat.S_ISLNK(st.st_mode):
+            raise SyncError(
+                f"source symlink forbidden: {rel.as_posix()}"
+            )
+
+        is_leaf = index == len(rel.parts) - 1
+
+        if not is_leaf:
+            if not stat.S_ISDIR(st.st_mode):
+                raise SyncError(
+                    f"source path component is not a directory: "
+                    f"{rel.as_posix()}"
+                )
             continue
-        rel = p.relative_to(source).as_posix()
+
+        if not stat.S_ISREG(st.st_mode):
+            raise SyncError(
+                f"source special file forbidden: {rel.as_posix()}"
+            )
+
+        return st
+
+    raise SyncError(
+        f"could not validate source path: {path}"
+    )
+
+
+def _walk_source_regular_files(
+    source: Path,
+) -> list[tuple[Path, os.stat_result]]:
+    """Enumerate source without ever following filesystem symlinks."""
+    root = _source_root_without_symlinks(source)
+    pending = [root]
+    files: list[tuple[Path, os.stat_result]] = []
+
+    while pending:
+        directory = pending.pop()
+
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(
+                    iterator,
+                    key=lambda entry: entry.name,
+                )
+        except OSError as exc:
+            rel = (
+                "."
+                if directory == root
+                else directory.relative_to(root).as_posix()
+            )
+
+            raise SyncError(
+                f"cannot enumerate source directory {rel}: {exc}"
+            ) from exc
+
+        child_directories: list[Path] = []
+
+        for entry in entries:
+            path = Path(entry.path)
+            rel = _source_relative_path(
+                path,
+                root,
+            ).as_posix()
+
+            try:
+                st = entry.stat(
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                raise SyncError(
+                    f"cannot stat source entry {rel}: {exc}"
+                ) from exc
+
+            if stat.S_ISLNK(st.st_mode):
+                raise SyncError(
+                    f"source symlink forbidden: {rel}"
+                )
+
+            if stat.S_ISDIR(st.st_mode):
+                child_directories.append(path)
+                continue
+
+            if stat.S_ISREG(st.st_mode):
+                files.append((path, st))
+                continue
+
+            raise SyncError(
+                f"source special file forbidden: {rel}"
+            )
+
+        # Stack in reverse so traversal itself remains deterministic.
+        pending.extend(
+            reversed(child_directories)
+        )
+
+    return sorted(
+        files,
+        key=lambda item: (
+            item[0]
+            .relative_to(root)
+            .as_posix()
+        ),
+    )
+
+
+def scan_source(source: Path) -> list[Track]:
+    root = _source_root_without_symlinks(source)
+    tracks = []
+
+    for p, source_st in _walk_source_regular_files(root):
+        ext = p.suffix.lower()
+
+        if (
+            ext not in SUPPORTED_DIRECT
+            and ext not in TRANSCODE_EXTS
+        ):
+            continue
+
+        rel = (
+            p.relative_to(root)
+            .as_posix()
+        )
+
+        # Revalidate immediately before invoking an external parser. This is
+        # deliberately redundant with discovery: a source entry must still be
+        # an ordinary non-symlink file when it is consumed.
+        current_st = _require_regular_source_path(
+            p,
+            root,
+        )
+
+        if (
+            current_st.st_dev != source_st.st_dev
+            or current_st.st_ino != source_st.st_ino
+        ):
+            raise SyncError(
+                f"source identity changed during scan: {rel}"
+            )
+
         duration, br, sr = probe_audio(p)
+
+        post_probe_st = _require_regular_source_path(
+            p,
+            root,
+        )
+
+        if (
+            post_probe_st.st_dev != current_st.st_dev
+            or post_probe_st.st_ino != current_st.st_ino
+            or post_probe_st.st_size != current_st.st_size
+        ):
+            raise SyncError(
+                f"source changed while probing: {rel}"
+            )
+
         direct = ext == ".mp3"
-        tracks.append(Track(
-            source=p,
-            source_rel=rel,
-            title=p.stem,
-            sha256=sha256_file(p),
-            source_size=p.stat().st_size,
-            duration_ms=duration,
-            bitrate_kbps=br,
-            sample_rate_hz=sr,
-            direct_mp3=direct,
-        ))
+
+        tracks.append(
+            Track(
+                source=p,
+                source_rel=rel,
+                title=p.stem,
+                sha256=sha256_file(p),
+                source_size=post_probe_st.st_size,
+                duration_ms=duration,
+                bitrate_kbps=br,
+                sample_rate_hz=sr,
+                direct_mp3=direct,
+            )
+        )
+
     return tracks
 
 
@@ -920,8 +1170,27 @@ def compile_cbk_helper(work: Path) -> Path:
     src.write_text(CBK_HELPER_C)
     flags = run(["pkg-config", "--cflags", "--libs", "glib-2.0"]).stdout.split()
     run([
-        "gcc", "-O2", "-Wall", "-Wextra", f"-I{RIJNDAEL_SRC.parent}",
-        str(src), str(RIJNDAEL_SRC), *flags, "-o", str(exe),
+        "gcc",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Wformat=2",
+        "-Wformat-security",
+        "-Werror=format-security",
+        "-fstack-protector-strong",
+        "-D_FORTIFY_SOURCE=2",
+        "-fPIE",
+        "-fno-common",
+        f"-I{RIJNDAEL_SRC.parent}",
+        str(src),
+        str(RIJNDAEL_SRC),
+        *flags,
+        "-Wl,-z,relro",
+        "-Wl,-z,now",
+        "-Wl,-z,noexecstack",
+        "-pie",
+        "-o",
+        str(exe),
     ])
     return exe
 
@@ -996,8 +1265,27 @@ def compile_current_cdb_signer(work: Path) -> Path:
     src.write_text(text)
     flags = run(["pkg-config", "--cflags", "--libs", "glib-2.0"]).stdout.split()
     run([
-        "gcc", "-O2", "-Wall", "-Wextra", f"-I{RIJNDAEL_SRC.parent}",
-        str(src), str(RIJNDAEL_SRC), *flags, "-o", str(exe),
+        "gcc",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Wformat=2",
+        "-Wformat-security",
+        "-Werror=format-security",
+        "-fstack-protector-strong",
+        "-D_FORTIFY_SOURCE=2",
+        "-fPIE",
+        "-fno-common",
+        f"-I{RIJNDAEL_SRC.parent}",
+        str(src),
+        str(RIJNDAEL_SRC),
+        *flags,
+        "-Wl,-z,relro",
+        "-Wl,-z,now",
+        "-Wl,-z,noexecstack",
+        "-pie",
+        "-o",
+        str(exe),
     ])
     return exe
 
@@ -1206,25 +1494,69 @@ def plan_generic(source: Path, mount: Path, run_dir: Path) -> list[Track]:
 def validate_tracks_source(
     tracks: list[Track], source_root: Path, source_guard: SourceGuard | None = None
 ):
-    root = source_root.resolve()
+    root = _source_root_without_symlinks(source_root)
+
     if source_guard is not None:
         recheck_source_guard(source_guard)
+
     for t in tracks:
-        if not t.source.is_file():
-            raise SyncError(f"source disappeared: {t.source}")
-        resolved_source = t.source.resolve()
+        source_st = _require_regular_source_path(
+            t.source,
+            root,
+        )
+
+        resolved_source = t.source.resolve(
+            strict=True,
+        )
+
         try:
-            resolved_source.relative_to(root)
-        except ValueError:
-            raise SyncError(f"source escaped configured root: {t.source}")
-        if source_guard is not None and not _path_within(resolved_source, source_guard.mountpoint):
-            raise SyncError(f"source escaped read-only source mount: {t.source}")
-        if t.source.stat().st_size != t.source_size:
-            raise SyncError(f"source size changed: {t.source}")
+            resolved_source.relative_to(
+                root.resolve(strict=True)
+            )
+        except ValueError as exc:
+            raise SyncError(
+                f"source escaped configured root: {t.source}"
+            ) from exc
+
+        if (
+            source_guard is not None
+            and not _path_within(
+                resolved_source,
+                source_guard.mountpoint,
+            )
+        ):
+            raise SyncError(
+                f"source escaped read-only source mount: {t.source}"
+            )
+
+        if source_st.st_size != t.source_size:
+            raise SyncError(
+                f"source size changed: {t.source}"
+            )
+
         actual = sha256_file(t.source)
+
+        post_hash_st = _require_regular_source_path(
+            t.source,
+            root,
+        )
+
+        if (
+            post_hash_st.st_dev != source_st.st_dev
+            or post_hash_st.st_ino != source_st.st_ino
+            or post_hash_st.st_size != source_st.st_size
+        ):
+            raise SyncError(
+                f"source changed while validating: {t.source}"
+            )
+
         if t.sha256 and actual != t.sha256:
-            raise SyncError(f"source SHA256 changed: {t.source}")
+            raise SyncError(
+                f"source SHA256 changed: {t.source}"
+            )
+
         t.sha256 = actual
+
         if t.direct_mp3:
             t.output_size = t.source_size
             t.output_sha256 = actual

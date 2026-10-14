@@ -801,3 +801,56 @@ THIRD_PARTY.md
 ```
 
 and the notices included with the corresponding source.
+
+## Source and native-code security hardening
+
+The configured music source remains a strict read-only security boundary.
+
+Source discovery is fail-closed. `ipod-sync` recursively supports ordinary
+nested directories, but it refuses filesystem objects that could make source
+resolution ambiguous or escape the configured source tree:
+
+- source-root symlinks;
+- file symlinks, including links whose targets remain inside the source tree;
+- directory symlinks;
+- broken symlinks;
+- FIFOs;
+- Unix sockets;
+- device nodes and other non-regular special files.
+
+Every source path component is checked without following symlinks. Tracks are
+revalidated again before write authorization, including identity, size, and
+SHA-256 checks. A source path that changes into a symlink or otherwise changes
+identity during the operation is rejected.
+
+This deliberately uses a stricter policy than merely checking where a symlink
+eventually resolves. Ordinary real nested directories remain supported.
+
+Filenames are treated as data rather than shell syntax. Regression tests cover
+leading dashes, quotes, shell metacharacters, embedded newlines, Unicode, and
+nested paths. External media tools are invoked with argument vectors rather
+than shell command interpolation.
+
+Native components are compiled with explicit production hardening, including:
+
+- stack-protector hardening;
+- fortified libc calls where supported;
+- format-string security checks;
+- PIE;
+- RELRO;
+- immediate symbol binding;
+- non-executable stack;
+- `-fno-common`.
+
+The packaged `sync-envelope` ELF is checked during both package construction and
+package audit. A package fails validation if the required ELF hardening
+properties are absent.
+
+CI also builds the project-native C components with AddressSanitizer and
+UndefinedBehaviorSanitizer. The CDB signer and Rijndael implementation receive
+runtime sanitizer smoke coverage.
+
+`sync-envelope` is sanitizer-built but is intentionally not executed by the
+automated sanitizer smoke test because starting it can initiate the real
+libimobiledevice sync protocol with a physically connected device. Device
+communication is therefore kept outside this automated security test.
