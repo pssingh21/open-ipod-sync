@@ -2278,11 +2278,9 @@ int itdb_sqlite_generate_itdbs(FExport *fexp)
 
     tzoffset = fexp->itdb->tzoffset;
 
-    tmpdir = g_build_path(g_get_tmp_dir(), tmpnam(NULL), NULL);
-    if (g_mkdir(tmpdir, 0755) != 0) {
-	g_set_error (&fexp->error, G_FILE_ERROR, g_file_error_from_errno(errno),
-		     "Could not create temporary directory '%s': %s",
-		     tmpdir, strerror(errno));
+    tmpdir = g_dir_make_tmp("libgpod-XXXXXX", &fexp->error);
+    if (tmpdir == NULL) {
+	g_prefix_error(&fexp->error, "Could not create temporary directory: ");
 	res = -1;
 	goto leave;
     }

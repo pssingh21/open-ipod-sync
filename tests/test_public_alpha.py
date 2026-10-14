@@ -61,4 +61,11 @@ assert ('audited-' + 'frozen') not in text
 assert ('TEMPLATE_' + 'FALLBACK_PID') not in text
 assert ('--no-' + 'frozen-v4') not in text
 assert 'source != mountpoint' in text
+
+libgpod_sqlite = (
+    ROOT / "third_party/libgpod-patched-source/src/itdb_sqlite.c"
+).read_text()
+assert "tmpnam(" not in libgpod_sqlite
+assert "g_dir_make_tmp(" in libgpod_sqlite
+
 print('public alpha unit tests: PASS')
