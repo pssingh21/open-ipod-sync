@@ -77,9 +77,14 @@ CI additionally performs source-build and package-audit compatibility testing on
 
 Those Ubuntu jobs validate that the public source tree, bundled modified
 libgpod, native helpers, and Debian package can be built and audited on the
-newer host library/toolchain stacks. They do not represent real-device testing
-on Ubuntu and do not assert that the Debian-11-built release package is
-directly installable on those distributions.
+newer host library/toolchain stacks. They also install, reinstall, and remove
+the package built on that same Ubuntu host to exercise package lifecycle and
+host-specific shared-library dependency generation.
+
+They do not represent real-device testing on Ubuntu and do not assert that the
+Debian-11-built release package is directly installable on those
+distributions. Binary packages remain tied to the ABI/library versions of the
+host on which they were built.
 
 Other host distributions and Apple devices remain experimental.
 

@@ -42,7 +42,7 @@ echo "Build timestamp UTC: $(date -u --date="@${SOURCE_DATE_EPOCH}" '+%Y-%m-%dT%
 [[ -d "$ROOT/third_party/libgpod-patched-source/src" ]] || { echo "ERROR: captured patched libgpod source missing" >&2; exit 1; }
 [[ -f "$ROOT/native/rijndael.c" && -f "$ROOT/native/rijndael.h" ]] || { echo "ERROR: captured rijndael sources missing" >&2; exit 1; }
 
-for cmd in dpkg-deb gcc g++ make pkg-config python3 intltool-update msgfmt strip; do
+for cmd in dpkg-deb dpkg-shlibdeps gcc g++ make pkg-config python3 intltool-update msgfmt strip; do
   command -v "$cmd" >/dev/null || {
     echo "ERROR: missing build command: $cmd" >&2
     echo "Debian/Ubuntu build prerequisites include: build-essential dpkg-dev pkg-config intltool gettext" >&2
@@ -260,6 +260,102 @@ exit 0
 POSTINST
 chmod 0755 "$BUILD/DEBIAN/postinst"
 
+
+# Generate runtime shared-library dependencies from the actual packaged ELF
+# objects instead of hard-coding distro-specific binary package names.
+#
+# The temporary tree deliberately uses the conventional
+# debian/ipod-sync/... layout expected by dpkg-shlibdeps. This keeps the
+# dependency analysis tied to exact copies of the finalized package ELFs
+# while avoiding assumptions about whether a host calls its ABI package
+# libplist3, libplist-2.0-4, libimobiledevice6, etc.
+SHLIBDEPS_ROOT="$ROOT/build/shlibdeps"
+SHLIBDEPS_PKG="$SHLIBDEPS_ROOT/debian/ipod-sync"
+
+rm -rf "$SHLIBDEPS_ROOT"
+
+mkdir -p \
+  "$SHLIBDEPS_PKG/usr/lib/ipod-sync/native" \
+  "$SHLIBDEPS_PKG$RUNTIME_PREFIX/lib"
+
+SYNC_ELF="$BUILD/usr/lib/ipod-sync/native/sync-envelope"
+LIBGPOD_ELF="$BUILD$RUNTIME_PREFIX/lib/libgpod.so.4.3.2"
+
+[[ -f "$SYNC_ELF" ]] || {
+  echo "ERROR: sync-envelope missing before shlib dependency generation" >&2
+  exit 1
+}
+
+[[ -f "$LIBGPOD_ELF" ]] || {
+  echo "ERROR: packaged libgpod missing before shlib dependency generation" >&2
+  exit 1
+}
+
+cp "$SYNC_ELF" \
+   "$SHLIBDEPS_PKG/usr/lib/ipod-sync/native/sync-envelope"
+
+cp "$LIBGPOD_ELF" \
+   "$SHLIBDEPS_PKG$RUNTIME_PREFIX/lib/libgpod.so.4.3.2"
+
+cmp -s \
+  "$SYNC_ELF" \
+  "$SHLIBDEPS_PKG/usr/lib/ipod-sync/native/sync-envelope" || {
+  echo "ERROR: shlibdeps sync-envelope copy differs from package ELF" >&2
+  exit 1
+}
+
+cmp -s \
+  "$LIBGPOD_ELF" \
+  "$SHLIBDEPS_PKG$RUNTIME_PREFIX/lib/libgpod.so.4.3.2" || {
+  echo "ERROR: shlibdeps libgpod copy differs from package ELF" >&2
+  exit 1
+}
+
+cat > "$SHLIBDEPS_ROOT/debian/control" <<'SHLIBCONTROL'
+Source: ipod-sync
+Section: utils
+Priority: optional
+Maintainer: ipod-sync project
+Standards-Version: 4.5.1
+
+Package: ipod-sync
+Architecture: any
+Description: Temporary shlib dependency analysis package
+SHLIBCONTROL
+
+SHLIB_OUTPUT="$(
+  cd "$SHLIBDEPS_ROOT"
+
+  LC_ALL=C.UTF-8 \
+    dpkg-shlibdeps \
+      -O \
+      -e"debian/ipod-sync/usr/lib/ipod-sync/native/sync-envelope" \
+      -e"debian/ipod-sync$RUNTIME_PREFIX/lib/libgpod.so.4.3.2"
+)"
+
+mapfile -t SHLIB_DEP_LINES < <(
+  printf '%s\n' "$SHLIB_OUTPUT" |
+    sed -n 's/^shlibs:Depends=//p'
+)
+
+[[ "${#SHLIB_DEP_LINES[@]}" -eq 1 ]] || {
+  echo "ERROR: expected exactly one shlibs:Depends result" >&2
+  printf '%s\n' "$SHLIB_OUTPUT" >&2
+  exit 1
+}
+
+SHLIB_DEPENDS="${SHLIB_DEP_LINES[0]}"
+
+[[ -n "$SHLIB_DEPENDS" ]] || {
+  echo "ERROR: generated shared-library dependency list is empty" >&2
+  exit 1
+}
+
+echo "Generated ELF runtime dependencies:"
+echo "$SHLIB_DEPENDS"
+
+rm -rf "$SHLIBDEPS_ROOT"
+
 cat > "$BUILD/DEBIAN/control" <<CONTROL
 Package: ipod-sync
 Version: $VER
@@ -267,7 +363,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: ipod-sync project
-Depends: python3, ifuse, libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, libc6, libglib2.0-0, libimobiledevice6, libplist3, libsqlite3-0, libxml2, zlib1g, libusb-1.0-0
+Depends: python3, ifuse, libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, $SHLIB_DEPENDS, libusb-1.0-0
 Description: Experimental ADD-only music sync for legacy iPod touch devices
  Streams music from a dedicated kernel-read-only source mount to a legacy iPod,
  commits Apple music databases inside an iTunes-style sync envelope, and
