@@ -5,14 +5,25 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # Reproducible package timestamp.
 #
-# Respect an externally supplied SOURCE_DATE_EPOCH first. Otherwise derive it
-# from the current Git commit. A source archive has no .git directory, so fall
-# back to the archived build script's mtime in that case.
+# Respect an externally supplied SOURCE_DATE_EPOCH first.
+#
+# In a Git checkout, the commit timestamp is authoritative. Never silently
+# fall back to checkout/file mtimes if Git metadata is present, because those
+# mtimes depend on when the checkout happened.
+#
+# A source archive has no .git metadata, so in that case use the archived
+# build script's mtime. git archive preserves commit timestamps.
 if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
-  if command -v git >/dev/null 2>&1 &&
-     git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1
-  then
-    SOURCE_DATE_EPOCH="$(git -C "$ROOT" log -1 --format=%ct)"
+  if [[ -e "$ROOT/.git" ]]; then
+    command -v git >/dev/null 2>&1 || {
+      echo "ERROR: Git checkout present but git is unavailable" >&2
+      exit 1
+    }
+
+    if ! SOURCE_DATE_EPOCH="$(git -C "$ROOT" log -1 --format=%ct)"; then
+      echo "ERROR: Git checkout present but commit timestamp could not be read" >&2
+      exit 1
+    fi
   else
     SOURCE_DATE_EPOCH="$(stat -c '%Y' "$ROOT/build-deb.sh")"
   fi
@@ -24,6 +35,9 @@ fi
 }
 
 export SOURCE_DATE_EPOCH
+
+echo "Build SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
+echo "Build timestamp UTC: $(date -u --date="@${SOURCE_DATE_EPOCH}" '+%Y-%m-%dT%H:%M:%SZ')"
 [[ -f "$ROOT/vendor/ipodctl/cdb.py" ]] || { echo "ERROR: capture components first" >&2; exit 1; }
 [[ -d "$ROOT/third_party/libgpod-patched-source/src" ]] || { echo "ERROR: captured patched libgpod source missing" >&2; exit 1; }
 [[ -f "$ROOT/native/rijndael.c" && -f "$ROOT/native/rijndael.h" ]] || { echo "ERROR: captured rijndael sources missing" >&2; exit 1; }

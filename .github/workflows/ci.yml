@@ -140,6 +140,10 @@ jobs:
           cat /etc/debian_version
           python3 --version
           gcc --version | head -n 1
+          dpkg-deb --version | head -n 1
+          dpkg-query -W -f='dpkg=${Version}\n' dpkg
+          xz --version | head -n 1
+          tar --version | head -n 1
           dpkg --print-architecture
 
           python3 --version | grep -E '^Python 3\.9\.'
