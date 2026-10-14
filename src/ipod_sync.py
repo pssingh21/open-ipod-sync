@@ -2057,6 +2057,38 @@ def verify_prewrite_noop_state(rollback, mount: Path, tracks: list[Track], pre_h
     }
 
 
+RECOVERABLE_JOURNAL_PHASES = frozenset({
+    "prepared",
+    "rw-preimage-verified",
+    "sync-lock-active",
+    "media-copying",
+    "media-complete",
+    "db-commit-started",
+    "db-committed",
+    "rollback-started",
+    "rollback-complete",
+    "sync-envelope-closed",
+    "sync-close-failed",
+    "rollback-complete-after-close-failure",
+    "recovery-required",
+    "post-validating",
+    "post-validation-failed",
+    "rollback-complete-after-post-validation",
+    "recovery-started",
+    "recovery-restored",
+    "recovery-failed",
+})
+
+
+def recovery_journal_phase(journal: dict) -> str:
+    phase = journal.get("phase")
+    if phase not in RECOVERABLE_JOURNAL_PHASES:
+        raise SyncError(
+            f"unknown or non-recoverable transaction journal phase: {phase!r}"
+        )
+    return phase
+
+
 def recover_check(mount: Path) -> int:
     """Read-only inspection of an incomplete transaction.
 
@@ -2069,6 +2101,7 @@ def recover_check(mount: Path) -> int:
         return 0
 
     journal = load_json(ACTIVE_TXN)
+    phase = recovery_journal_phase(journal)
     run_dir = Path(journal["run_dir"])
     print(f"RECOVERY CHECK: {run_dir}")
     verify_device_connection()
@@ -2082,14 +2115,14 @@ def recover_check(mount: Path) -> int:
     try:
         report = verify_prewrite_noop_state(rollback, mount, tracks, pre_hash)
     except SyncError as exc:
-        print(f"journal phase:      {journal.get('phase')}")
+        print(f"journal phase:      {phase}")
         print("rollback state:     NOT PROVEN")
         print(f"reason:             {exc}")
         print("iPod remains read-only: PASS")
         print("No recovery write was attempted.")
         return 2
 
-    print(f"journal phase:      {journal.get('phase')}")
+    print(f"journal phase:      {phase}")
     print("core preimage:      PASS")
     print("transaction media: ABSENT")
     print("Extras semantics:  PASS")
@@ -2119,6 +2152,8 @@ def recover_transaction(mount: Path) -> int:
         clear_active_journal()
         return 0
 
+    phase = recovery_journal_phase(journal)
+
     print(f"RECOVERY REQUIRED: {run_dir}")
     verify_device_connection()
     require_ifuse_mount(mount, writable=False)
@@ -2135,7 +2170,6 @@ def recover_transaction(mount: Path) -> int:
     # files must exactly match the saved preimage, Extras must be
     # semantically unchanged, and Library may differ only by Apple's
     # monotonically-advanced __CPRecordSequenceNumber bookkeeping.
-    phase = journal.get("phase")
     try:
         report = verify_prewrite_noop_state(rollback, mount, tracks, pre_hash)
     except SyncError:
