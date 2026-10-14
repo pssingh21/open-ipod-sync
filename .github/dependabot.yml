@@ -1,0 +1,27 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+
+    # Delay ordinary version updates long enough for newly published
+    # releases to receive some ecosystem exposure. Security updates are
+    # not subject to Dependabot cooldowns.
+    cooldown:
+      default-days: 7
+
+    open-pull-requests-limit: 5
+
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+    labels:
+      - dependencies
+      - security
