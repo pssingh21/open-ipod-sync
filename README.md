@@ -28,6 +28,16 @@ Current release:
 0.2.0-alpha.6
 ```
 
+Current development version on `main`:
+
+```text
+0.2.0-alpha.7
+```
+
+Alpha.7 is unreleased. Download, installation, checksum, and attestation
+examples below continue to refer to the immutable alpha.6 release until a new
+release is published.
+
 This software is **experimental**.
 
 Alpha.6 focuses on read-only diagnostics and automation, temporary-file
