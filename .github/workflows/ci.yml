@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-source-sanity:
+    name: Public source sanity — Python 3.9
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.9'
+
+      - name: Show environment
+        run: |
+          set -euo pipefail
+          python3 --version
+          bash --version | head -n 1
+          git --version
+
+      - name: Check tracked files for whitespace errors
+        run: |
+          set -euo pipefail
+          git diff --check
+
+      - name: Run public source sanity checks
+        run: |
+          set -euo pipefail
+          ./tools/public-sanity-check.sh
+
+      - name: Verify tests did not modify source tree
+        run: |
+          set -euo pipefail
+
+          status="$(git status --porcelain --untracked-files=all)"
+
+          if [ -n "$status" ]; then
+            echo "ERROR: CI checks modified or generated files in the source tree:"
+            printf '%s\n' "$status"
+            exit 1
+          fi
+
+          echo "source tree remains clean: PASS"
