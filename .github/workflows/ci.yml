@@ -258,6 +258,11 @@ jobs:
           echo
           cat ci-artifact/SHA256SUMS
 
+      - name: Scan complete CI artifact privacy boundary
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py ci-artifact
+
       - name: Upload audited Debian package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -425,6 +430,11 @@ jobs:
 
             sha256sum "${checksum_files[@]}" > SHA256SUMS
           )
+
+      - name: Scan downloaded and rebuilt artifact privacy boundaries
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py baseline rebuilt-bundle
 
       - name: Verify reproducible Debian package and supply-chain metadata
         run: |
@@ -637,6 +647,11 @@ jobs:
             cd lifecycle-artifact
             sha256sum -c SHA256SUMS
           )
+
+      - name: Scan lifecycle artifact privacy boundary
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py lifecycle-artifact
 
       - name: Run package lifecycle tests
         run: |

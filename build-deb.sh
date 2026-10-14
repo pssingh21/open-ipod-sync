@@ -395,7 +395,14 @@ find "$BUILD" -type f -name '*.pyc' -delete
 find "$BUILD" -exec   touch --no-dereference --date="@${SOURCE_DATE_EPOCH}" {} +
 
 dpkg-deb --build --root-owner-group "$BUILD" "$ROOT/dist/${PKG}.deb"
-sha256sum "$ROOT/dist/${PKG}.deb" > "$ROOT/dist/${PKG}.deb.sha256"
+
+# Generate a relocatable checksum sidecar. Running sha256sum from inside dist/
+# ensures the manifest records only the artifact basename and never leaks the
+# developer/runner checkout path.
+(
+  cd "$ROOT/dist"
+  sha256sum "${PKG}.deb" > "${PKG}.deb.sha256"
+)
 
 # Private preparation kit performs the full privacy audit and public source
 # bundle generation. The generated public source tree can still run this build

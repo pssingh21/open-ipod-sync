@@ -22,6 +22,41 @@ echo "$DEB"
 sha256sum "$DEB"
 
 echo
+echo "===== CHECKSUM SIDECAR ====="
+
+SIDECAR="${DEB}.sha256"
+
+[[ -f "$SIDECAR" ]] || {
+  echo "FAIL: checksum sidecar missing: $SIDECAR" >&2
+  exit 1
+}
+
+EXPECTED_HASH="$(
+  sha256sum "$DEB" |
+  awk '{print $1}'
+)"
+
+EXPECTED_NAME="$(basename "$DEB")"
+EXPECTED_LINE="${EXPECTED_HASH}  ${EXPECTED_NAME}"
+
+ACTUAL_LINE="$(
+  cat "$SIDECAR"
+)"
+
+[[ "$ACTUAL_LINE" == "$EXPECTED_LINE" ]] || {
+  echo "FAIL: checksum sidecar is not canonical" >&2
+  echo "expected basename-only checksum entry" >&2
+  exit 1
+}
+
+(
+  cd "$(dirname "$DEB")"
+  sha256sum -c "$(basename "$SIDECAR")"
+)
+
+echo "checksum sidecar: PASS (basename-only, verified)"
+
+echo
 echo "===== METADATA ====="
 
 PACKAGE="$(dpkg-deb -f "$DEB" Package)"
@@ -214,55 +249,14 @@ fi
 echo "configuration management: PASS"
 
 echo
-echo "===== PRIVATE / DEVELOPMENT FINGERPRINTS ====="
+echo "===== PRIVACY BOUNDARY ====="
 
-python3 - "$PAYLOAD" "$CONTROL" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-roots = [Path(p) for p in sys.argv[1:]]
-
-patterns = [
-    re.compile(rb'(?<![A-Za-z0-9_./-])/home/[A-Za-z0-9_.-]+/'),
-    re.compile(rb'(?<![A-Za-z0-9_./-])/Users/[A-Za-z0-9_.-]+/'),
-    re.compile(b'syn_' + b'admin'),
-    re.compile(rb'192\.168\.1\.161'),
-    re.compile(b'ipod-' + b'test-add'),
-    re.compile(b'rename-' + b'601'),
-    re.compile(b'FROZEN_' + b'PREIMAGE'),
-    re.compile(b'FROZEN_' + b'ARTIFACT'),
-    re.compile(b'TEMPLATE_' + b'FALLBACK_PID'),
-    re.compile(rb'public release preparation kit'),
-    re.compile(rb'Do not upload it'),
-]
-
-failed = False
-
-for root in roots:
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-
-        for pattern in patterns:
-            if pattern.search(data):
-                print(
-                    f"FAIL: {path}: "
-                    f"private/development fingerprint matched: {pattern.pattern!r}"
-                )
-                failed = True
-
-if failed:
-    raise SystemExit(1)
-
-print("privacy scan: PASS")
-PY
+# Scan both the raw Debian artifact and its payload/control archive members.
+# privacy-scan.py performs Debian extraction in a temporary directory and
+# never mutates the source tree or the package.
+python3 "$ROOT/tools/privacy-scan.py" "$DEB"
 
 echo
+
 echo "===== PACKAGE AUDIT ====="
 echo "AUDIT PASS"
