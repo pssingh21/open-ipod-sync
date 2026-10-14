@@ -2,6 +2,47 @@
 
 All notable public changes to `open-ipod-sync` will be documented here.
 
+## 0.2.0-alpha.7 — Unreleased
+
+Host compatibility and binary-packaging portability hardening.
+
+### Added
+
+- Ubuntu 24.04 amd64 and Ubuntu 26.04 amd64 CI compatibility jobs.
+- Host-built Debian-package audit and install/reinstall/remove lifecycle
+  validation on both supported Ubuntu CI hosts.
+- Host-specific ELF shared-library dependency generation using
+  `dpkg-shlibdeps`.
+
+### Changed
+
+- The build now supports modern `libplist-2.0` pkg-config naming through a
+  build-local compatibility alias when the historical `libplist` module name
+  is unavailable.
+- ELF ABI dependencies are generated from the actual packaged native binaries
+  instead of hard-coding Debian 11 runtime package names.
+- Debian 11 remains the canonical reproducible release environment, while
+  Ubuntu compatibility packages are built against their respective host ABI
+  and package sets.
+
+### Validated
+
+- Public source sanity, native compilation, package audit, and package
+  lifecycle all pass on Ubuntu 24.04 amd64 and Ubuntu 26.04 amd64.
+- Debian 11 package build, audit, reproducibility, lifecycle, SBOM,
+  provenance, and GitHub artifact-attestation gates continue to pass.
+- Host dependency generation resolves the appropriate distribution package
+  names while preserving the actual ELF SONAME requirements.
+
+### Release intent
+
+Alpha.7 currently contains packaging, CI, portability, and release-engineering
+hardening only. It does not add new synchronization write behavior.
+
+Real-device validation remains based on the existing Debian 11 development
+environment. No real-device write transaction has yet been performed with an
+alpha.7 artifact.
+
 ## 0.2.0-alpha.6 — 2026-10-14
 
 Read-only automation, diagnostics, temporary-file safety, and supply-chain
