@@ -347,4 +347,208 @@ with tempfile.TemporaryDirectory() as td:
     assert tree_snapshot(mount) == device_before
 
 
+
+def expect_sync_error(source: Path, mount: Path, run_dir: Path, expected: str):
+    try:
+        run_plan(source, mount, run_dir)
+    except m.SyncError as exc:
+        message = str(exc)
+        assert expected in message, (expected, message)
+        return message
+
+    raise AssertionError(f"expected SyncError containing: {expected!r}")
+
+
+# ---------------------------------------------------------------------------
+# Failure case 1:
+#
+# Library/Locations reference a song whose media file is missing.
+#
+# The planner must fail closed and must not modify either tree.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+    run_dir = root / "run"
+
+    source.mkdir()
+    mount.mkdir()
+    run_dir.mkdir()
+
+    location = "F30/MISS.mp3"
+
+    build_device(
+        mount,
+        [
+            (401, location, PAYLOAD_A),
+        ],
+    )
+
+    (mount / m._location_to_device_rel(location)).unlink()
+
+    write_file(source / "new-C.mp3", PAYLOAD_C)
+
+    source_before = tree_snapshot(source)
+    device_before = tree_snapshot(mount)
+
+    expect_sync_error(
+        source,
+        mount,
+        run_dir,
+        "iPod database references missing media",
+    )
+
+    assert tree_snapshot(source) == source_before
+    assert tree_snapshot(mount) == device_before
+
+
+# ---------------------------------------------------------------------------
+# Failure case 2:
+#
+# Locations.itdb contains path traversal.
+#
+# Normalization must reject it before source scanning or destination
+# allocation can proceed.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+    run_dir = root / "run"
+
+    source.mkdir()
+    mount.mkdir()
+    run_dir.mkdir()
+
+    build_device(
+        mount,
+        [
+            (501, "F31/SAFE.mp3", PAYLOAD_A),
+        ],
+    )
+
+    locations_db = m.live_paths(mount)["Locations.itdb"]
+
+    con = sqlite3.connect(locations_db)
+    try:
+        con.execute(
+            "UPDATE location SET location = ? WHERE item_pid = ?",
+            ("../evil.mp3", 501),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    write_file(source / "renamed-A.mp3", PAYLOAD_A)
+
+    source_before = tree_snapshot(source)
+    device_before = tree_snapshot(mount)
+
+    expect_sync_error(
+        source,
+        mount,
+        run_dir,
+        "unsafe iPod media location",
+    )
+
+    assert tree_snapshot(source) == source_before
+    assert tree_snapshot(mount) == device_before
+
+
+# ---------------------------------------------------------------------------
+# Failure case 3:
+#
+# Library.itdb contains a song but Locations.itdb has no corresponding row.
+#
+# The device content index must refuse to guess where that song lives.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+    run_dir = root / "run"
+
+    source.mkdir()
+    mount.mkdir()
+    run_dir.mkdir()
+
+    build_device(
+        mount,
+        [
+            (601, "F32/NOLOC.mp3", PAYLOAD_B),
+        ],
+    )
+
+    locations_db = m.live_paths(mount)["Locations.itdb"]
+
+    con = sqlite3.connect(locations_db)
+    try:
+        con.execute(
+            "DELETE FROM location WHERE item_pid = ?",
+            (601,),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    write_file(source / "new-C.mp3", PAYLOAD_C)
+
+    source_before = tree_snapshot(source)
+    device_before = tree_snapshot(mount)
+
+    expect_sync_error(
+        source,
+        mount,
+        run_dir,
+        "has no Locations.itdb media row",
+    )
+
+    assert tree_snapshot(source) == source_before
+    assert tree_snapshot(mount) == device_before
+
+
+# ---------------------------------------------------------------------------
+# Failure case 4:
+#
+# Two NEW source files have the same filename stem.
+#
+# Even though their contents differ, assigning identical blank-metadata titles
+# would be ambiguous. The planner must refuse rather than guess.
+# ---------------------------------------------------------------------------
+
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    source = root / "source"
+    mount = root / "device"
+    run_dir = root / "run"
+
+    source.mkdir()
+    mount.mkdir()
+    run_dir.mkdir()
+
+    build_device(mount, [])
+
+    payload_d = b"mock-track-D-content\n"
+
+    write_file(source / "disc1/song.mp3", PAYLOAD_C)
+    write_file(source / "disc2/song.mp3", payload_d)
+
+    source_before = tree_snapshot(source)
+    device_before = tree_snapshot(mount)
+
+    expect_sync_error(
+        source,
+        mount,
+        run_dir,
+        "duplicate NEW filename stems are ambiguous",
+    )
+
+    assert tree_snapshot(source) == source_before
+    assert tree_snapshot(mount) == device_before
+
+
 print("mock planner integration tests: PASS")
