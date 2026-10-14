@@ -1,0 +1,11 @@
+# actionlint 1.7.12 does not yet recognize GitHub's ubuntu-26.04 hosted
+# runner label. GitHub made ubuntu-26.04 generally available in September
+# 2026, so ignore only this known stale-runner-list finding in ci.yml.
+#
+# Remove this exception once the pinned actionlint release recognizes
+# ubuntu-26.04 natively.
+
+paths:
+  .github/workflows/ci.yml:
+    ignore:
+      - 'label "ubuntu-26\.04" is unknown'

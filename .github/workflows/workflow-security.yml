@@ -1,0 +1,90 @@
+name: Workflow security
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: workflow-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-policy:
+    name: Workflow policy and actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Enforce local workflow security policy
+        run: |
+          set -euo pipefail
+          python3 tools/check-workflow-security.py
+
+      - name: Install pinned actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+
+          archive="/tmp/actionlint.tar.gz"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+
+          printf '%s  %s\n' \
+            "$ACTIONLINT_SHA256" \
+            "$archive" \
+            | sha256sum --check -
+
+          mkdir -p /tmp/actionlint
+          tar -xzf "$archive" -C /tmp/actionlint
+
+          /tmp/actionlint/actionlint -version
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          /tmp/actionlint/actionlint -color
+
+  zizmor:
+    name: zizmor GitHub Actions security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          inputs: .github/

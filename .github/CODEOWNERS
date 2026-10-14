@@ -1,0 +1,20 @@
+# Default ownership
+* @pssingh21
+
+# Security-sensitive CI / release infrastructure
+/.github/ @pssingh21
+/build-deb.sh @pssingh21
+/tools/ @pssingh21
+
+# Synchronization implementation and native code
+/src/ @pssingh21
+/native/ @pssingh21
+
+# Bundled / patched dependency source
+/third_party/ @pssingh21
+/vendor/ @pssingh21
+
+# Security and release documentation
+/SECURITY.md @pssingh21
+/docs/RELEASE-RUNBOOK.md @pssingh21
+/docs/ARCHITECTURE.md @pssingh21
