@@ -27,6 +27,7 @@ PY
 
 # Public-alpha regression tests.
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_public_alpha.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_mock_planner_integration.py"
 
 # Old private migration implementation must not exist in public sources.
 if grep -R -a -nE \
