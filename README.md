@@ -64,17 +64,28 @@ A fresh live ADD transaction has not yet been performed with the exact
 
 ## Tested platform
 
-Validated configuration:
+Validated device configuration:
 
 - Debian 11 amd64
 - iPod touch 2nd generation
 - iOS 4.2.1
 
-Other Debian/Ubuntu versions and other Apple devices are currently experimental.
+CI additionally performs source-build and package-audit compatibility testing on:
 
-The prebuilt Debian package is intended for the environment against which it was
-built. For other distributions or newer library stacks, building from source is
-recommended.
+- Ubuntu 24.04 amd64
+- Ubuntu 26.04 amd64
+
+Those Ubuntu jobs validate that the public source tree, bundled modified
+libgpod, native helpers, and Debian package can be built and audited on the
+newer host library/toolchain stacks. They do not represent real-device testing
+on Ubuntu and do not assert that the Debian-11-built release package is
+directly installable on those distributions.
+
+Other host distributions and Apple devices remain experimental.
+
+The prebuilt Debian package is intended for the environment against which it
+was built. For other distributions or newer library stacks, building from
+source is recommended.
 
 ## Safety model
 
