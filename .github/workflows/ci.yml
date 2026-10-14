@@ -196,7 +196,7 @@ jobs:
           fi
 
           ./tools/audit-deb.sh "${packages[0]}"
-      - name: Prepare audited CI artifact
+      - name: Prepare audited CI artifact with SBOM and provenance
         run: |
           set -euo pipefail
 
@@ -215,14 +215,49 @@ jobs:
 
           mkdir -p ci-artifact
 
-          cp "${packages[0]}" ci-artifact/
+          package_name="$(basename "${packages[0]}")"
+          cp "${packages[0]}" "ci-artifact/$package_name"
+
+          git_commit="$(git rev-parse HEAD)"
+          source_date_epoch="$(git log -1 --format=%ct)"
+
+          python3 tools/generate-supply-chain-metadata.py \
+            "ci-artifact/$package_name" \
+            --output-dir ci-artifact \
+            --git-commit "$git_commit" \
+            --source-date-epoch "$source_date_epoch" \
+            --build-environment \
+              "debian-11-amd64-snapshot-20260830T235959Z"
 
           (
             cd ci-artifact
-            sha256sum ./*.deb > SHA256SUMS
+
+            mapfile -t checksum_files < <(
+              find . \
+                -maxdepth 1 \
+                -type f \
+                \( \
+                  -name '*.deb' -o \
+                  -name '*.spdx.json' -o \
+                  -name 'PROVENANCE.json' \
+                \) \
+                -printf '%f\n' |
+              sort
+            )
+
+            if [[ "${#checksum_files[@]}" -ne 3 ]]; then
+              echo "ERROR: expected Debian package, SPDX SBOM, and provenance" >&2
+              printf '%s\n' "${checksum_files[@]}" >&2
+              exit 1
+            fi
+
+            sha256sum "${checksum_files[@]}" > SHA256SUMS
           )
 
           echo "===== CI ARTIFACT ====="
+          ls -l ci-artifact
+
+          echo
           cat ci-artifact/SHA256SUMS
 
       - name: Upload audited Debian package
@@ -231,6 +266,8 @@ jobs:
           name: ipod-sync-debian11-amd64-${{ github.sha }}
           path: |
             ci-artifact/*.deb
+            ci-artifact/*.spdx.json
+            ci-artifact/PROVENANCE.json
             ci-artifact/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
@@ -285,7 +322,65 @@ jobs:
           set -euo pipefail
           ./build-deb.sh
 
-      - name: Verify reproducible Debian package
+      - name: Generate independent SBOM and provenance
+        run: |
+          set -euo pipefail
+
+          mapfile -t rebuilt_packages < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          if [[ "${#rebuilt_packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one independently rebuilt package" >&2
+            exit 1
+          fi
+
+          mkdir -p rebuilt-bundle
+
+          package_name="$(basename "${rebuilt_packages[0]}")"
+          cp "${rebuilt_packages[0]}" "rebuilt-bundle/$package_name"
+
+          git_commit="$(git rev-parse HEAD)"
+          source_date_epoch="$(git log -1 --format=%ct)"
+
+          python3 tools/generate-supply-chain-metadata.py \
+            "rebuilt-bundle/$package_name" \
+            --output-dir rebuilt-bundle \
+            --git-commit "$git_commit" \
+            --source-date-epoch "$source_date_epoch" \
+            --build-environment \
+              "debian-11-amd64-snapshot-20260830T235959Z"
+
+          (
+            cd rebuilt-bundle
+
+            mapfile -t checksum_files < <(
+              find . \
+                -maxdepth 1 \
+                -type f \
+                \( \
+                  -name '*.deb' -o \
+                  -name '*.spdx.json' -o \
+                  -name 'PROVENANCE.json' \
+                \) \
+                -printf '%f\n' |
+              sort
+            )
+
+            [[ "${#checksum_files[@]}" -eq 3 ]] || {
+              echo "ERROR: unexpected rebuilt supply-chain bundle" >&2
+              printf '%s\n' "${checksum_files[@]}" >&2
+              exit 1
+            }
+
+            sha256sum "${checksum_files[@]}" > SHA256SUMS
+          )
+
+      - name: Verify reproducible Debian package and supply-chain metadata
         run: |
           set -euo pipefail
 
@@ -298,42 +393,115 @@ jobs:
           )
 
           mapfile -t rebuilt_packages < <(
-            find dist \
+            find rebuilt-bundle \
               -maxdepth 1 \
               -type f \
               -name 'ipod-sync_*_amd64.deb' \
               -print
           )
 
-          if [[ "${#baseline_packages[@]}" -ne 1 ]]; then
-            echo "ERROR: expected exactly one baseline package" >&2
+          mapfile -t baseline_sboms < <(
+            find baseline \
+              -maxdepth 1 \
+              -type f \
+              -name '*.spdx.json' \
+              -print
+          )
+
+          mapfile -t rebuilt_sboms < <(
+            find rebuilt-bundle \
+              -maxdepth 1 \
+              -type f \
+              -name '*.spdx.json' \
+              -print
+          )
+
+          [[ "${#baseline_packages[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one baseline Debian package" >&2
             exit 1
-          fi
+          }
 
-          if [[ "${#rebuilt_packages[@]}" -ne 1 ]]; then
-            echo "ERROR: expected exactly one independently rebuilt package" >&2
+          [[ "${#rebuilt_packages[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one rebuilt Debian package" >&2
             exit 1
-          fi
+          }
 
-          baseline="${baseline_packages[0]}"
-          rebuilt="${rebuilt_packages[0]}"
+          [[ "${#baseline_sboms[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one baseline SPDX SBOM" >&2
+            exit 1
+          }
 
-          echo "===== BASELINE ====="
-          sha256sum "$baseline"
+          [[ "${#rebuilt_sboms[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one rebuilt SPDX SBOM" >&2
+            exit 1
+          }
+
+          [[ -f baseline/PROVENANCE.json ]] || {
+            echo "ERROR: baseline provenance missing" >&2
+            exit 1
+          }
+
+          [[ -f rebuilt-bundle/PROVENANCE.json ]] || {
+            echo "ERROR: rebuilt provenance missing" >&2
+            exit 1
+          }
+
+          [[ -f baseline/SHA256SUMS ]] || {
+            echo "ERROR: baseline SHA256SUMS missing" >&2
+            exit 1
+          }
+
+          [[ -f rebuilt-bundle/SHA256SUMS ]] || {
+            echo "ERROR: rebuilt SHA256SUMS missing" >&2
+            exit 1
+          }
+
+          echo "===== BASELINE BUNDLE ====="
+          (
+            cd baseline
+            sha256sum -c SHA256SUMS
+          )
 
           echo
-          echo "===== INDEPENDENT REBUILD ====="
-          sha256sum "$rebuilt"
+          echo "===== INDEPENDENT REBUILD BUNDLE ====="
+          (
+            cd rebuilt-bundle
+            sha256sum -c SHA256SUMS
+          )
 
           echo
-          echo "===== REPRODUCIBILITY ====="
+          echo "===== BYTE-FOR-BYTE REPRODUCIBILITY ====="
 
-          if ! cmp -s "$baseline" "$rebuilt"; then
+          cmp -s "${baseline_packages[0]}" "${rebuilt_packages[0]}" || {
             echo "ERROR: Debian package is not byte-for-byte reproducible" >&2
             exit 1
-          fi
+          }
 
-          echo "PASS: Debian package is byte-for-byte reproducible"
+          echo "Debian package: PASS"
+
+          cmp -s "${baseline_sboms[0]}" "${rebuilt_sboms[0]}" || {
+            echo "ERROR: SPDX SBOM is not byte-for-byte reproducible" >&2
+            exit 1
+          }
+
+          echo "SPDX SBOM:     PASS"
+
+          cmp -s baseline/PROVENANCE.json rebuilt-bundle/PROVENANCE.json || {
+            echo "ERROR: provenance metadata is not byte-for-byte reproducible" >&2
+            exit 1
+          }
+
+          echo "provenance:     PASS"
+
+          cmp -s baseline/SHA256SUMS rebuilt-bundle/SHA256SUMS || {
+            echo "ERROR: SHA256SUMS is not byte-for-byte reproducible" >&2
+            exit 1
+          }
+
+          echo "SHA256SUMS:     PASS"
+
+          echo
+          echo "PASS: complete audited supply-chain bundle is reproducible"
 
   package-lifecycle:
     name: Debian 11 package lifecycle

@@ -281,6 +281,17 @@ pass their privacy and ownership audits.
 Release-specific SHA-256 checksums are published as a `SHA256SUMS` asset with
 each GitHub release rather than being stored inside the tagged source tree.
 
+CI package artifacts also include:
+
+- an SPDX 2.3 JSON SBOM for the Debian package;
+- a deterministic `PROVENANCE.json` document binding the Debian artifact,
+  source commit, `SOURCE_DATE_EPOCH`, bundled libgpod patch, and packaged
+  component hashes;
+- a `SHA256SUMS` file covering the Debian package, SBOM, and provenance.
+
+The project provenance document is deterministic build metadata. It is not
+currently a cryptographically signed SLSA/in-toto attestation.
+
 ## Known limitations
 
 - ADD-only synchronization.

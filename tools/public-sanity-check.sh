@@ -32,6 +32,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_transaction_safety.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_apply_transaction_orchestration.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_recovery_state_machine.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_cli_safety_routing.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_supply_chain_metadata.py"
 
 # Old private migration implementation must not exist in public sources.
 if grep -R -a -nE \
