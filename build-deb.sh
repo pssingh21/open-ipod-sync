@@ -2,6 +2,28 @@
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Reproducible package timestamp.
+#
+# Respect an externally supplied SOURCE_DATE_EPOCH first. Otherwise derive it
+# from the current Git commit. A source archive has no .git directory, so fall
+# back to the archived build script's mtime in that case.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+  if command -v git >/dev/null 2>&1 &&
+     git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1
+  then
+    SOURCE_DATE_EPOCH="$(git -C "$ROOT" log -1 --format=%ct)"
+  else
+    SOURCE_DATE_EPOCH="$(stat -c '%Y' "$ROOT/build-deb.sh")"
+  fi
+fi
+
+[[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || {
+  echo "ERROR: invalid SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH" >&2
+  exit 1
+}
+
+export SOURCE_DATE_EPOCH
 [[ -f "$ROOT/vendor/ipodctl/cdb.py" ]] || { echo "ERROR: capture components first" >&2; exit 1; }
 [[ -d "$ROOT/third_party/libgpod-patched-source/src" ]] || { echo "ERROR: captured patched libgpod source missing" >&2; exit 1; }
 [[ -f "$ROOT/native/rijndael.c" && -f "$ROOT/native/rijndael.h" ]] || { echo "ERROR: captured rijndael sources missing" >&2; exit 1; }
@@ -226,6 +248,10 @@ chmod 0755 "$BUILD/usr/bin/ipod-sync" "$BUILD/usr/lib/ipod-sync/ipod_sync.py" "$
 # Python bytecode embeds build paths and is unnecessary in this package.
 find "$BUILD" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUILD" -type f -name '*.pyc' -delete
+
+# Normalize the complete package staging tree. This prevents filesystem/build
+# time from leaking into control.tar and data.tar.
+find "$BUILD" -exec   touch --no-dereference --date="@${SOURCE_DATE_EPOCH}" {} +
 
 dpkg-deb --build --root-owner-group "$BUILD" "$ROOT/dist/${PKG}.deb"
 sha256sum "$ROOT/dist/${PKG}.deb" > "$ROOT/dist/${PKG}.deb.sha256"
