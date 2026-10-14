@@ -88,3 +88,5 @@ jobs:
         with:
           advanced-security: false
           inputs: .github/
+          # Do not allow scanner behavior to drift between identical commits.
+          version: "1.30.1"

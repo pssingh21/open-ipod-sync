@@ -318,6 +318,7 @@ jobs:
       - name: Verify CI bundle and attestations
         shell: bash
         env:
+          EXPECTED_DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -371,7 +372,7 @@ jobs:
           done
 
           [[ "$(dpkg-deb -f "$DEB" Version)" == \
-              "${{ steps.vars.outputs.deb_version }}" ]] || {
+              "$EXPECTED_DEB_VERSION" ]] || {
             echo "ERROR: Debian artifact version mismatch" >&2
             exit 1
           }

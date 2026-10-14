@@ -9,3 +9,11 @@ paths:
   .github/workflows/ci.yml:
     ignore:
       - 'label "ubuntu-26\.04" is unknown'
+
+  .github/workflows/release.yml:
+    # SC2129 is a ShellCheck style-only recommendation to combine repeated
+    # redirects. Keep the existing release logic unchanged rather than
+    # refactoring security-sensitive publication code solely for style.
+    # All other ShellCheck/actionlint findings remain enabled.
+    ignore:
+      - 'SC2129:style'
