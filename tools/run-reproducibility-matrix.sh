@@ -14,7 +14,9 @@ usage:
     SOURCE.tar \
     COMMIT_SHA \
     SOURCE_DATE_EPOCH \
-    OUTPUT_DIR
+    OUTPUT_DIR \
+    SNAPSHOT_IDENTITY \
+    BASE_IMAGE_IDENTITY
 
 Builds the same committed source archive twice under deliberately different
 build environments and requires the complete generated supply-chain bundles to
@@ -31,12 +33,14 @@ EOF
     exit 2
 }
 
-[[ $# -eq 4 ]] || usage
+[[ $# -eq 6 ]] || usage
 
 ARCHIVE="$1"
 COMMIT="$2"
 SOURCE_EPOCH="$3"
 OUTPUT_ROOT="$4"
+SNAPSHOT_IDENTITY="$5"
+BASE_IMAGE_IDENTITY="$6"
 
 [[ -f "$ARCHIVE" ]] || {
     echo "ERROR: source archive missing: $ARCHIVE" >&2
@@ -50,6 +54,16 @@ OUTPUT_ROOT="$4"
 
 [[ "$SOURCE_EPOCH" =~ ^[0-9]+$ ]] || {
     echo "ERROR: invalid source epoch: $SOURCE_EPOCH" >&2
+    exit 1
+}
+
+[[ -n "$SNAPSHOT_IDENTITY" ]] || {
+    echo "ERROR: snapshot identity must not be empty" >&2
+    exit 1
+}
+
+[[ -n "$BASE_IMAGE_IDENTITY" ]] || {
+    echo "ERROR: base-image identity must not be empty" >&2
     exit 1
 }
 
@@ -80,6 +94,16 @@ ARCHIVE="$(
         "$(basename -- "$ARCHIVE")"
 )"
 
+ARCHIVE_SHA256="$(
+    sha256sum "$ARCHIVE" |
+    awk '{print $1}'
+)"
+
+[[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "ERROR: invalid source archive SHA-256" >&2
+    exit 1
+}
+
 OUTPUT_ROOT="$(
     mkdir -p "$OUTPUT_ROOT"
     cd -- "$OUTPUT_ROOT"
@@ -92,7 +116,8 @@ rm -rf \
 
 mkdir -p \
     "$OUTPUT_ROOT/builder-a" \
-    "$OUTPUT_ROOT/builder-b"
+    "$OUTPUT_ROOT/builder-b" \
+    "$OUTPUT_ROOT/materials"
 
 SYSTEM_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -374,6 +399,28 @@ NO_GIT
     )
 
     echo
+    echo "===== CAPTURE $label BUILD MATERIALS ====="
+
+    "$NETWORK_HELPER" /usr/bin/env -i \
+        PATH="$fake_bin:$SYSTEM_PATH" \
+        HOME="$home_dir" \
+        TMPDIR="$tmp_dir" \
+        TZ="$timezone" \
+        LC_ALL="$locale_name" \
+        LANG="$locale_name" \
+        USER="$synthetic_user" \
+        LOGNAME="$synthetic_user" \
+        PYTHONHASHSEED="$hash_seed" \
+        python3 \
+        "$ROOT/tools/generate-build-materials.py" \
+        --source-archive "$ARCHIVE" \
+        --source-commit "$COMMIT" \
+        --source-date-epoch "$SOURCE_EPOCH" \
+        --snapshot-identity "$SNAPSHOT_IDENTITY" \
+        --base-image-identity "$BASE_IMAGE_IDENTITY" \
+        --output "$OUTPUT_ROOT/materials/builder-$label.json"
+
+    echo
     echo "builder $label: PASS"
 }
 
@@ -466,6 +513,162 @@ done
 
 
 echo
+echo "===== VERIFY BUILD-MATERIALS MANIFESTS ====="
+
+MATERIALS_A="$OUTPUT_ROOT/materials/builder-a.json"
+MATERIALS_B="$OUTPUT_ROOT/materials/builder-b.json"
+
+[[ -f "$MATERIALS_A" ]] || {
+    echo "ERROR: builder A build-materials manifest missing" >&2
+    exit 1
+}
+
+[[ -f "$MATERIALS_B" ]] || {
+    echo "ERROR: builder B build-materials manifest missing" >&2
+    exit 1
+}
+
+cmp -s \
+    "$MATERIALS_A" \
+    "$MATERIALS_B" || {
+        echo "ERROR: isolated builders consumed different materials" >&2
+
+        diff -u \
+            "$MATERIALS_A" \
+            "$MATERIALS_B" \
+            >&2 || true
+
+        exit 1
+    }
+
+python3 - \
+    "$MATERIALS_A" \
+    "$COMMIT" \
+    "$SOURCE_EPOCH" \
+    "$ARCHIVE_SHA256" \
+    "$SNAPSHOT_IDENTITY" \
+    "$BASE_IMAGE_IDENTITY" <<'PYVERIFY'
+import json
+import sys
+from pathlib import Path
+
+(
+    manifest_path,
+    commit,
+    epoch,
+    archive_sha,
+    snapshot,
+    base_image,
+) = sys.argv[1:]
+
+document = json.loads(
+    Path(manifest_path).read_text()
+)
+
+if document.get("schema") != (
+    "open-ipod-sync-build-materials-v1"
+):
+    raise SystemExit(
+        "ERROR: unexpected build-materials schema"
+    )
+
+source = document.get("source", {})
+
+expected_source = {
+    "archive_sha256": archive_sha,
+    "commit": commit,
+    "source_date_epoch": int(epoch),
+}
+
+if source != expected_source:
+    raise SystemExit(
+        "ERROR: build-materials source identity mismatch"
+    )
+
+declared = document.get(
+    "declared_environment",
+    {},
+)
+
+if declared.get(
+    "snapshot_identity"
+) != snapshot:
+    raise SystemExit(
+        "ERROR: snapshot identity mismatch"
+    )
+
+if declared.get(
+    "base_image_identity"
+) != base_image:
+    raise SystemExit(
+        "ERROR: base-image identity mismatch"
+    )
+
+observed = document.get(
+    "observed_environment",
+    {},
+)
+
+if not observed.get("architecture"):
+    raise SystemExit(
+        "ERROR: build architecture missing"
+    )
+
+if not observed.get("debian_version"):
+    raise SystemExit(
+        "ERROR: Debian version missing"
+    )
+
+packages = observed.get(
+    "build_packages",
+    [],
+)
+
+if len(packages) < 20:
+    raise SystemExit(
+        "ERROR: unexpectedly small build-package material set"
+    )
+
+modules = observed.get(
+    "pkg_config_modules",
+    [],
+)
+
+if len(modules) < 6:
+    raise SystemExit(
+        "ERROR: unexpectedly small pkg-config material set"
+    )
+
+tools = observed.get(
+    "tools",
+    {},
+)
+
+for required in (
+    "ar",
+    "dpkg-deb",
+    "g++",
+    "gcc",
+    "ld",
+    "make",
+    "pkg-config",
+    "python3",
+    "strip",
+):
+    if not tools.get(required):
+        raise SystemExit(
+            f"ERROR: missing build tool material: {required}"
+        )
+
+print("build-materials schema: PASS")
+print("source material identity: PASS")
+print("declared environment identity: PASS")
+print("observed package/tool materials: PASS")
+PYVERIFY
+
+echo "builder A/B build materials: BYTE-IDENTICAL"
+
+echo
 echo "===== VERIFY BOTH CHECKSUM MANIFESTS ====="
 
 (
@@ -487,6 +690,7 @@ echo "socket-backed stdio:     REFUSED"
 echo "builder A:               ISOLATED"
 echo "builder B:               ISOLATED"
 echo "metadata A/B:            ISOLATED"
+echo "build materials A/B:      BYTE-IDENTICAL"
 
 echo
 echo "========================================================================"
