@@ -1,0 +1,830 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.2.0-alpha.8"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      version: ${{ steps.vars.outputs.version }}
+      deb_version: ${{ steps.vars.outputs.deb_version }}
+      public_version: ${{ steps.vars.outputs.public_version }}
+      ci_run_id: ${{ steps.ci.outputs.run_id }}
+
+    steps:
+      - name: Check out exact dispatch commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release identity
+        id: vars
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "ERROR: releases may only be dispatched from main" >&2
+            exit 1
+          }
+
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]] || {
+            echo "ERROR: unsupported release version: $RELEASE_VERSION" >&2
+            exit 1
+          }
+
+          git fetch --no-tags origin main
+
+          MAIN_SHA="$(git rev-parse origin/main)"
+
+          echo "dispatch SHA: $GITHUB_SHA"
+          echo "main SHA:     $MAIN_SHA"
+
+          [[ "$MAIN_SHA" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: dispatched commit is not the current main HEAD" >&2
+            exit 1
+          }
+
+          DEB_VERSION="${RELEASE_VERSION/-alpha./~alpha}"
+          PUBLIC_VERSION="${DEB_VERSION//~/.}"
+          TAG="v${RELEASE_VERSION}"
+
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "deb_version=$DEB_VERSION" >> "$GITHUB_OUTPUT"
+          echo "public_version=$PUBLIC_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          echo "application version: $RELEASE_VERSION"
+          echo "Debian version:      $DEB_VERSION"
+          echo "public asset version:$PUBLIC_VERSION"
+          echo "tag:                 $TAG"
+
+          grep -Fx "VERSION = \"$RELEASE_VERSION\"" \
+            src/ipod_sync.py >/dev/null || {
+            echo "ERROR: src/ipod_sync.py version does not match input" >&2
+            exit 1
+          }
+
+          grep -Fx "VER=\"$DEB_VERSION\"" \
+            build-deb.sh >/dev/null || {
+            echo "ERROR: build-deb.sh version does not match input" >&2
+            exit 1
+          }
+
+          python3 - "$RELEASE_VERSION" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = sys.argv[1]
+
+          changelog = Path("CHANGELOG.md").read_text()
+          readme = Path("README.md").read_text()
+
+          heading = re.compile(
+              rf"^## {re.escape(version)} — "
+              r"\d{4}-\d{2}-\d{2}$",
+              re.MULTILINE,
+          )
+
+          matches = heading.findall(changelog)
+
+          if len(matches) != 1:
+              raise SystemExit(
+                  "ERROR: expected exactly one dated release "
+                  f"heading for {version}; found {len(matches)}"
+              )
+
+          if f"## {version} — Unreleased" in changelog:
+              raise SystemExit(
+                  f"ERROR: {version} is still marked Unreleased"
+              )
+
+          marker = "Current release:\n\n```text\n"
+          start = readme.find(marker)
+
+          if start == -1:
+              raise SystemExit(
+                  "ERROR: README current-release block not found"
+              )
+
+          start += len(marker)
+          end = readme.find("\n```", start)
+
+          if end == -1:
+              raise SystemExit(
+                  "ERROR: malformed README current-release block"
+              )
+
+          current = readme[start:end].strip()
+
+          if current != version:
+              raise SystemExit(
+                  f"ERROR: README current release is {current!r}, "
+                  f"expected {version!r}"
+              )
+
+          print("release documentation identity: PASS")
+          PY
+
+          if git ls-remote --exit-code \
+              --tags origin \
+              "refs/tags/$TAG" >/dev/null 2>&1
+          then
+            echo "ERROR: release tag already exists: $TAG" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          then
+            echo "ERROR: GitHub Release already exists: $TAG" >&2
+            exit 1
+          fi
+
+          IMMUTABLE="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$GITHUB_REPOSITORY/immutable-releases" \
+              --jq '.enabled'
+          )"
+
+          [[ "$IMMUTABLE" == "true" ]] || {
+            echo "ERROR: immutable releases are not enabled" >&2
+            exit 1
+          }
+
+          echo "tag/release absence + immutable policy: PASS"
+
+      - name: Locate exact successful main CI run
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUN_JSON="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow CI \
+              --branch main \
+              --commit "$GITHUB_SHA" \
+              --event push \
+              --limit 1 \
+              --json databaseId,headSha,status,conclusion,url
+          )"
+
+          printf '%s\n' "$RUN_JSON"
+
+          RUN_ID="$(
+            python3 - "$GITHUB_SHA" "$RUN_JSON" <<'PY'
+          import json
+          import sys
+
+          expected = sys.argv[1]
+          runs = json.loads(sys.argv[2])
+
+          if len(runs) != 1:
+              raise SystemExit(
+                  "ERROR: expected exactly one main push CI run "
+                  f"for {expected}; found {len(runs)}"
+              )
+
+          run = runs[0]
+
+          if run["headSha"] != expected:
+              raise SystemExit(
+                  f"ERROR: CI SHA {run['headSha']} != {expected}"
+              )
+
+          if run["status"] != "completed":
+              raise SystemExit(
+                  f"ERROR: CI is not completed: {run['status']}"
+              )
+
+          if run["conclusion"] != "success":
+              raise SystemExit(
+                  f"ERROR: CI conclusion is {run['conclusion']}"
+              )
+
+          print(run["databaseId"])
+          PY
+          )"
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+          python3 - "$GITHUB_REPOSITORY" "$RUN_ID" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          repo = sys.argv[1]
+          run_id = sys.argv[2]
+
+          doc = json.loads(
+              subprocess.check_output(
+                  [
+                      "gh", "run", "view", run_id,
+                      "--repo", repo,
+                      "--json", "jobs",
+                  ],
+                  text=True,
+              )
+          )
+
+          jobs = {
+              job["name"]: job["conclusion"]
+              for job in doc["jobs"]
+          }
+
+          required = {
+              "Public source sanity — Python 3.9",
+              "Debian 11 package build + audit",
+              "Debian 11 reproducibility gate",
+              "Debian 11 package lifecycle",
+              "Ubuntu host compatibility — ubuntu-24.04",
+              "Ubuntu host compatibility — ubuntu-26.04",
+              "GitHub artifact attestations",
+          }
+
+          missing = required - set(jobs)
+
+          if missing:
+              raise SystemExit(
+                  f"ERROR: missing CI jobs: {sorted(missing)}"
+              )
+
+          bad = {
+              name: jobs[name]
+              for name in required
+              if jobs[name] != "success"
+          }
+
+          if bad:
+              raise SystemExit(
+                  f"ERROR: non-success CI jobs: {bad}"
+              )
+
+          print("exact main CI gate set: PASS")
+          PY
+
+      - name: Download exact CI artifact bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ci-bundle
+
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "ipod-sync-debian11-amd64-$GITHUB_SHA" \
+            --dir ci-bundle
+
+          find ci-bundle \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' |
+          sort
+
+      - name: Verify CI bundle and attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          (
+            cd ci-bundle
+            sha256sum -c SHA256SUMS
+          )
+
+          mapfile -t DEBS < <(
+            find ci-bundle \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print |
+            sort
+          )
+
+          mapfile -t SPDXS < <(
+            find ci-bundle \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.spdx.json' \
+              -print |
+            sort
+          )
+
+          [[ "${#DEBS[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one Debian artifact" >&2
+            exit 1
+          }
+
+          [[ "${#SPDXS[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one SPDX artifact" >&2
+            exit 1
+          }
+
+          DEB="${DEBS[0]}"
+          SPDX="${SPDXS[0]}"
+
+          for f in \
+              "$DEB" \
+              "$SPDX" \
+              ci-bundle/PROVENANCE.json \
+              ci-bundle/SHA256SUMS
+          do
+            [[ -f "$f" ]] || {
+              echo "ERROR: required CI artifact missing: $f" >&2
+              exit 1
+            }
+          done
+
+          [[ "$(dpkg-deb -f "$DEB" Version)" == \
+              "${{ steps.vars.outputs.deb_version }}" ]] || {
+            echo "ERROR: Debian artifact version mismatch" >&2
+            exit 1
+          }
+
+          grep -F "$GITHUB_SHA" \
+            ci-bundle/PROVENANCE.json >/dev/null || {
+            echo "ERROR: release SHA missing from provenance" >&2
+            exit 1
+          }
+
+          gh attestation verify "$DEB" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$DEB" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$SPDX" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify ci-bundle/PROVENANCE.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify ci-bundle/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo "CI checksums + attestations: PASS"
+
+      - name: Prepare immutable release bundle
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.vars.outputs.version }}
+          DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
+          PUBLIC_VERSION: ${{ steps.vars.outputs.public_version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p release
+
+          CI_DEB="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.deb"
+          CI_SPDX="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.spdx.json"
+
+          RELEASE_DEB="ipod-sync_${PUBLIC_VERSION}_amd64.deb"
+          RELEASE_SPDX="ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
+
+          [[ -f "$CI_DEB" ]] || {
+            echo "ERROR: exact CI Debian artifact missing: $CI_DEB" >&2
+            exit 1
+          }
+
+          [[ -f "$CI_SPDX" ]] || {
+            echo "ERROR: exact CI SPDX artifact missing: $CI_SPDX" >&2
+            exit 1
+          }
+
+          cp "$CI_DEB" \
+             "release/$RELEASE_DEB"
+
+          cp "$CI_SPDX" \
+             "release/$RELEASE_SPDX"
+
+          cp ci-bundle/PROVENANCE.json \
+             release/PROVENANCE.json
+
+          cp ci-bundle/SHA256SUMS \
+             release/CI-SHA256SUMS
+
+          cmp -s "$CI_DEB" \
+            "release/$RELEASE_DEB"
+
+          cmp -s "$CI_SPDX" \
+            "release/$RELEASE_SPDX"
+
+          cmp -s ci-bundle/PROVENANCE.json \
+            release/PROVENANCE.json
+
+          cmp -s ci-bundle/SHA256SUMS \
+            release/CI-SHA256SUMS
+
+          (
+            cd release
+
+            sha256sum \
+              "$RELEASE_DEB" \
+              "$RELEASE_SPDX" \
+              PROVENANCE.json \
+              CI-SHA256SUMS \
+              > SHA256SUMS
+
+            sha256sum -c SHA256SUMS
+          )
+
+          python3 - "$RELEASE_VERSION" <<'PY'
+          from pathlib import Path
+          import sys
+
+          version = sys.argv[1]
+          text = Path("CHANGELOG.md").read_text()
+
+          marker = f"## {version} — "
+          start = text.find(marker)
+
+          if start == -1:
+              raise SystemExit(
+                  f"ERROR: changelog entry missing for {version}"
+              )
+
+          next_heading = text.find("\n## ", start + len(marker))
+
+          if next_heading == -1:
+              section = text[start:].rstrip()
+          else:
+              section = text[start:next_heading].rstrip()
+
+          if "— Unreleased" in section.splitlines()[0]:
+              raise SystemExit(
+                  f"ERROR: {version} changelog is still Unreleased"
+              )
+
+          Path("release/RELEASE-NOTES.md").write_text(
+              section + "\n"
+          )
+
+          print("release notes extraction: PASS")
+          PY
+
+          echo "prepared release bundle:"
+          find release \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' |
+          sort
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: verified-release-bundle-${{ github.sha }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish immutable release
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    environment:
+      name: release
+
+    permissions:
+      actions: read
+      attestations: read
+      contents: write
+
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download verified release bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release-bundle-${{ github.sha }}
+          path: release
+
+      - name: Revalidate publication boundary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "ERROR: publication ref is not main" >&2
+            exit 1
+          }
+
+          git fetch --no-tags origin main
+
+          MAIN_SHA="$(git rev-parse origin/main)"
+
+          [[ "$MAIN_SHA" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: main moved after release dispatch" >&2
+            echo "dispatch SHA: $GITHUB_SHA" >&2
+            echo "current main: $MAIN_SHA" >&2
+            exit 1
+          }
+
+          if git ls-remote --exit-code \
+              --tags origin \
+              "refs/tags/$TAG" >/dev/null 2>&1
+          then
+            echo "ERROR: tag appeared after preflight: $TAG" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          then
+            echo "ERROR: release appeared after preflight: $TAG" >&2
+            exit 1
+          fi
+
+          (
+            cd release
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "publication boundary: PASS"
+
+      - name: Create and push annotated tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" "$GITHUB_SHA" \
+            -m "open-ipod-sync $RELEASE_VERSION"
+
+          [[ "$(git cat-file -t "$TAG")" == "tag" ]] || {
+            echo "ERROR: release tag is not annotated" >&2
+            exit 1
+          }
+
+          [[ "$(git rev-parse "$TAG^{}")" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: tag does not peel to release commit" >&2
+            exit 1
+          }
+
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$TAG"
+
+          REMOTE_TARGET="$(
+            git ls-remote origin \
+              "refs/tags/$TAG^{}" |
+            awk '{print $1}'
+          )"
+
+          [[ "$REMOTE_TARGET" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: remote tag target mismatch" >&2
+            exit 1
+          }
+
+          echo "annotated tag publication: PASS"
+
+      - name: Publish prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
+        run: |
+          set -euo pipefail
+
+          DEB="release/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
+          SPDX="release/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
+
+          gh release create "$TAG" \
+            "$DEB" \
+            "$SPDX" \
+            release/PROVENANCE.json \
+            release/CI-SHA256SUMS \
+            release/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease \
+            --latest=false \
+            --fail-on-no-commits \
+            --title "open-ipod-sync $RELEASE_VERSION" \
+            --notes-file release/RELEASE-NOTES.md
+
+          echo "release publication requested: PASS"
+
+      - name: Verify published release flags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_JSON="$(
+            gh release view "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,isImmutable,url,assets
+          )"
+
+          python3 - \
+            "$TAG" \
+            "$PUBLIC_VERSION" \
+            "$RELEASE_JSON" <<'PY'
+          import json
+          import sys
+
+          tag = sys.argv[1]
+          public_version = sys.argv[2]
+          doc = json.loads(sys.argv[3])
+
+          if doc["tagName"] != tag:
+              raise SystemExit("ERROR: release tag mismatch")
+
+          if doc["isDraft"]:
+              raise SystemExit("ERROR: release is still draft")
+
+          if not doc["isPrerelease"]:
+              raise SystemExit("ERROR: release is not prerelease")
+
+          if not doc["isImmutable"]:
+              raise SystemExit("ERROR: release is not immutable")
+
+          expected = {
+              "CI-SHA256SUMS",
+              "PROVENANCE.json",
+              "SHA256SUMS",
+              f"ipod-sync_{public_version}_amd64.deb",
+              f"ipod-sync_{public_version}_amd64.spdx.json",
+          }
+
+          actual = {
+              asset["name"]
+              for asset in doc["assets"]
+          }
+
+          if actual != expected:
+              raise SystemExit(
+                  "ERROR: release asset set mismatch\n"
+                  f"expected={sorted(expected)}\n"
+                  f"actual={sorted(actual)}"
+              )
+
+          print("immutable release flags + asset set: PASS")
+          print(doc["url"])
+          PY
+
+  verify:
+    name: Verify published release
+    needs:
+      - preflight
+      - publish
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      attestations: read
+      contents: read
+
+    steps:
+      - name: Download published assets fresh
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p published
+
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir published
+
+          find published \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' |
+          sort
+
+      - name: Verify published checksums and release attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
+        run: |
+          set -euo pipefail
+
+          (
+            cd published
+            sha256sum -c SHA256SUMS
+          )
+
+          DEB="published/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
+          SPDX="published/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
+
+          gh release verify "$TAG" \
+            --repo "$GITHUB_REPOSITORY"
+
+          for asset in \
+              "$DEB" \
+              "$SPDX" \
+              published/PROVENANCE.json \
+              published/CI-SHA256SUMS \
+              published/SHA256SUMS
+          do
+            gh release verify-asset \
+              "$TAG" \
+              "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              >/dev/null
+          done
+
+          gh attestation verify "$DEB" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$DEB" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$SPDX" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify published/PROVENANCE.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify published/CI-SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo
+          echo "============================================================"
+          echo "AUTOMATED RELEASE: COMPLETE + VERIFIED"
+          echo "============================================================"
