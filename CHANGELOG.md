@@ -2,7 +2,7 @@
 
 All notable public changes to `open-ipod-sync` will be documented here.
 
-## 0.2.0-alpha.7 — Unreleased
+## 0.2.0-alpha.7 — 2026-10-14
 
 Host compatibility and binary-packaging portability hardening.
 
@@ -36,7 +36,7 @@ Host compatibility and binary-packaging portability hardening.
 
 ### Release intent
 
-Alpha.7 currently contains packaging, CI, portability, and release-engineering
+Alpha.7 contains packaging, CI, portability, and release-engineering
 hardening only. It does not add new synchronization write behavior.
 
 Real-device validation remains based on the existing Debian 11 development
