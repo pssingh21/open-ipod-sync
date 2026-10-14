@@ -19,7 +19,7 @@ concurrency:
 jobs:
   public-source-sanity:
     name: Public source sanity — Python 3.9
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -69,7 +69,7 @@ jobs:
     needs:
       - public-source-sanity
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     container:
@@ -232,7 +232,7 @@ jobs:
   reproducibility-check:
     name: Debian 11 reproducibility gate
     needs: package-build-audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     container:
       image: debian:11
