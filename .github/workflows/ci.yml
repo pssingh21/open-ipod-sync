@@ -86,6 +86,16 @@ jobs:
 
           export DEBIAN_FRONTEND=noninteractive
 
+          # Debian 11 Bullseye reached LTS EOL in August 2026.
+          # Use Debian's immutable archive instead of the retired live mirrors.
+          rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+
+          cat > /etc/apt/sources.list <<'APT'
+          deb [check-valid-until=no] http://archive.debian.org/debian bullseye main
+          deb [check-valid-until=no] http://archive.debian.org/debian bullseye-updates main
+          deb [check-valid-until=no] http://archive.debian.org/debian-security bullseye-security main
+          APT
+
           apt-get update
 
           apt-get install -y --no-install-recommends \
