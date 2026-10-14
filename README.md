@@ -25,14 +25,18 @@ The project can:
 Current release:
 
 ```text
-0.2.0-alpha.4
+0.2.0-alpha.5
 ```
 
 This software is **experimental**.
 
-Alpha.4 is primarily a release-integrity and provenance update. It aligns the
-tagged public Git tree, explicit source archive, package version, and published
-checksums. The synchronization behavior is otherwise unchanged from alpha.3.
+Alpha.5 is primarily a safety, reproducibility, CI, package-validation, and
+recovery-hardening update. It adds automated package auditing, byte-for-byte
+reproducibility verification, package lifecycle testing, synthetic planner and
+transaction regression coverage, recovery-state-machine coverage, and
+fail-closed validation of transaction journal phases.
+
+The synchronization scope remains generic incremental ADD-only.
 
 The generic incremental ADD path has been live-tested end-to-end during development, including:
 
@@ -56,7 +60,7 @@ The public `0.2.0-alpha.3` predecessor additionally passed:
 - real-device read-only/idempotency planning.
 
 A fresh live ADD transaction has not yet been performed with the exact
-`0.2.0-alpha.4` release artifact itself. Treat this release as an alpha.
+`0.2.0-alpha.5` release artifact itself. Treat this release as an alpha.
 
 ## Tested platform
 
@@ -145,7 +149,7 @@ There is no hardcoded device-specific template identifier.
 On the currently tested Debian 11 amd64 environment:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0~alpha4_amd64.deb
+sudo apt install ./ipod-sync_0.2.0~alpha5_amd64.deb
 ```
 
 Then edit:

@@ -2,6 +2,62 @@
 
 All notable public changes to `open-ipod-sync` will be documented here.
 
+## 0.2.0-alpha.5 — 2026-10-14
+
+Safety, reproducibility, CI, package-validation, and recovery-hardening update.
+
+### Added
+
+- GitHub Actions CI for public-source sanity validation.
+- Automated Debian 11 package build and package-content auditing.
+- Automated byte-for-byte Debian package reproducibility gate.
+- Automated Debian package lifecycle testing for install, configuration
+  preservation, reinstall/upgrade behavior, and package removal.
+- Synthetic planner integration coverage for content matching, duplicate-content
+  multiplicity, destination allocation, and fail-closed planner behavior.
+- Transaction-safety regression coverage for source revalidation, destination
+  collisions, media-copy verification, live-preimage drift, rollback snapshot
+  integrity, and pre-write recovery invariants.
+- Synthetic `apply_transaction()` orchestration coverage, including ordering of
+  preflight barriers, writable remounts, source rechecks, media writes, database
+  commit checks, rollback paths, and read-only restoration.
+- Recovery-state-machine regression coverage.
+- CLI safety-routing coverage for dry-run, `--apply`, `--recover`,
+  `--recover-check`, conflicting flags, and active-journal blocking.
+
+### Changed
+
+- Pinned GitHub Actions runner selection to Ubuntu 24.04.
+- Pinned GitHub Actions dependencies to immutable commit SHAs.
+- Pinned the Debian 11 CI container to an immutable OCI digest.
+- Pinned Bullseye CI package installation to the Debian snapshot from
+  2026-08-30 and added retry handling for transient snapshot failures.
+- Made Debian package timestamps deterministic using `SOURCE_DATE_EPOCH`.
+- Made Git-derived reproducible-build epoch detection fail closed.
+- Normalized package-tree timestamps before `dpkg-deb` assembly.
+- Unknown or non-recoverable transaction journal phases now fail closed instead
+  of being interpreted as an already-completed rollback state.
+
+### Validated
+
+- The Debian package is independently rebuilt twice in the pinned CI environment
+  and required to be byte-for-byte identical.
+- Package payload ownership, runtime linkage, versioning, privacy fingerprints,
+  bytecode/cache absence, stripped ELF state, and configuration-management
+  behavior are audited automatically.
+- The safety-critical planner, transaction, recovery, and CLI routing paths are
+  exercised using temporary synthetic source/device trees without requiring a
+  real iPod.
+
+### Release intent
+
+Alpha.5 hardens the public release and synchronization safety infrastructure.
+It does not expand synchronization beyond the existing generic incremental
+ADD-only scope.
+
+A fresh live ADD transaction has not yet been performed with the exact
+`0.2.0-alpha.5` release artifact.
+
 ## 0.2.0-alpha.4 — 2026-10-14
 
 Release-integrity and provenance update.
