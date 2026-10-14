@@ -358,6 +358,49 @@ jobs:
           git -C "$GITHUB_WORKSPACE" rev-parse HEAD
           git -C "$GITHUB_WORKSPACE" log -1 --format='epoch=%ct date=%cI'
 
+      - name: Create deterministic commit source archive
+        run: |
+          set -euo pipefail
+
+          commit="$(git rev-parse HEAD)"
+          source_date_epoch="$(git log -1 --format=%ct)"
+
+          [[ "$commit" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: checked-out commit does not match workflow SHA" >&2
+            exit 1
+          }
+
+          ./tests/test_source_archive.sh
+
+          mkdir -p source-artifact
+
+          archive="source-artifact/open-ipod-sync-${commit}.tar"
+
+          ./tools/make-source-archive.sh \
+            "$archive" \
+            "$commit"
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$archive"
+          )"
+
+          [[ "$embedded_commit" == "$commit" ]] || {
+            echo "ERROR: source archive commit mismatch" >&2
+            exit 1
+          }
+
+          (
+            cd source-artifact
+            sha256sum "$(basename "$archive")" > SOURCE-SHA256SUMS
+            sha256sum -c SOURCE-SHA256SUMS
+          )
+
+          echo \
+            "REPRO_SOURCE_DATE_EPOCH=$source_date_epoch" \
+            >> "$GITHUB_ENV"
+
+          echo "deterministic source archive: PASS"
+
       - name: Download audited build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -376,38 +419,150 @@ jobs:
       - name: Build independent comparison package
         run: |
           set -euo pipefail
-          ./build-deb.sh
 
+          (
+            cd source-artifact
+            sha256sum -c SOURCE-SHA256SUMS
+          )
+
+          mapfile -t source_archives < <(
+            find source-artifact \
+              -maxdepth 1 \
+              -type f \
+              -name 'open-ipod-sync-*.tar' \
+              -print |
+            sort
+          )
+
+          [[ "${#source_archives[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one source archive" >&2
+            printf '%s\n' "${source_archives[@]}" >&2
+            exit 1
+          }
+
+          scratch="$(
+            mktemp \
+              -d \
+              -p /tmp \
+              ipod-sync-no-git-rebuild.XXXXXX
+          )"
+
+          mkdir -p \
+            "$scratch/home" \
+            "$scratch/tmp" \
+            "$scratch/no-git-bin"
+
+          tar -xf \
+            "${source_archives[0]}" \
+            -C "$scratch"
+
+          source_root="$scratch/open-ipod-sync-$GITHUB_SHA"
+
+          [[ -d "$source_root" ]] || {
+            echo "ERROR: extracted source root missing" >&2
+            exit 1
+          }
+
+          if find "$source_root" \
+              -name .git \
+              -print -quit |
+              grep -q .
+          then
+            echo "ERROR: extracted source unexpectedly contains .git" >&2
+            exit 1
+          fi
+
+          archive_epoch="$(
+            stat -c '%Y' \
+              "$source_root/build-deb.sh"
+          )"
+
+          [[ "$archive_epoch" == "$REPRO_SOURCE_DATE_EPOCH" ]] || {
+            echo "ERROR: archive mtime does not carry source epoch" >&2
+            echo "expected: $REPRO_SOURCE_DATE_EPOCH" >&2
+            echo "actual:   $archive_epoch" >&2
+            exit 1
+          }
+
+          cat > "$scratch/no-git-bin/git" <<'NO_GIT'
+          #!/bin/sh
+          echo "ERROR: git invoked during extracted-source build" >&2
+          exit 97
+          NO_GIT
+
+          chmod 0755 \
+            "$scratch/no-git-bin/git"
+
+          (
+            cd "$source_root"
+
+            env \
+              -u SOURCE_DATE_EPOCH \
+              -u GIT_DIR \
+              -u GIT_WORK_TREE \
+              PATH="$scratch/no-git-bin:$PATH" \
+              HOME="$scratch/home" \
+              TMPDIR="$scratch/tmp" \
+              TZ=Pacific/Kiritimati \
+              LC_ALL=C \
+              LANG=C \
+              PYTHONHASHSEED=8675309 \
+              IPOD_SYNC_BUILD_JOBS=1 \
+              ./build-deb.sh
+          )
+
+          echo "REPRO_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"
+
+          echo "extracted source .git metadata: ABSENT"
+          echo "git availability during build: DENIED"
+          echo "archive-carried SOURCE_DATE_EPOCH fallback: PASS"
+          echo "independent archive build: PASS"
       - name: Generate independent SBOM and provenance
         run: |
           set -euo pipefail
 
+          [[ -n "${REPRO_SOURCE_ROOT:-}" ]] || {
+            echo "ERROR: extracted reproducibility source root unavailable" >&2
+            exit 1
+          }
+
+          [[ ! -e "$REPRO_SOURCE_ROOT/.git" ]] || {
+            echo "ERROR: reproducibility source unexpectedly contains .git" >&2
+            exit 1
+          }
+
           mapfile -t rebuilt_packages < <(
-            find dist \
+            find "$REPRO_SOURCE_ROOT/dist" \
               -maxdepth 1 \
               -type f \
               -name 'ipod-sync_*_amd64.deb' \
-              -print
+              -print |
+            sort
           )
 
           if [[ "${#rebuilt_packages[@]}" -ne 1 ]]; then
             echo "ERROR: expected exactly one independently rebuilt package" >&2
+            printf '%s\n' "${rebuilt_packages[@]}" >&2
             exit 1
           fi
 
+          rm -rf rebuilt-bundle
           mkdir -p rebuilt-bundle
 
-          package_name="$(basename "${rebuilt_packages[0]}")"
-          cp "${rebuilt_packages[0]}" "rebuilt-bundle/$package_name"
+          package_name="$(
+            basename "${rebuilt_packages[0]}"
+          )"
 
-          git_commit="$(git rev-parse HEAD)"
-          source_date_epoch="$(git log -1 --format=%ct)"
+          cp \
+            "${rebuilt_packages[0]}" \
+            "rebuilt-bundle/$package_name"
 
-          python3 tools/generate-supply-chain-metadata.py \
+          python3 \
+            "$REPRO_SOURCE_ROOT/tools/generate-supply-chain-metadata.py" \
             "rebuilt-bundle/$package_name" \
             --output-dir rebuilt-bundle \
-            --git-commit "$git_commit" \
-            --source-date-epoch "$source_date_epoch" \
+            --git-commit "$GITHUB_SHA" \
+            --source-date-epoch "$REPRO_SOURCE_DATE_EPOCH" \
             --build-environment \
               "debian-11-amd64-snapshot-20260830T235959Z"
 
@@ -436,10 +591,12 @@ jobs:
             sha256sum "${checksum_files[@]}" > SHA256SUMS
           )
 
+          echo "metadata generated from extracted no-.git source: PASS"
       - name: Scan downloaded and rebuilt artifact privacy boundaries
         run: |
           set -euo pipefail
           python3 tools/privacy-scan.py baseline rebuilt-bundle
+          python3 tools/privacy-scan.py source-artifact
 
       - name: Verify reproducible Debian package and supply-chain metadata
         run: |

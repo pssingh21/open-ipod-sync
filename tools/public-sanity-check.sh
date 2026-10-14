@@ -71,4 +71,8 @@ then
   exit 1
 fi
 
+echo
+echo "===== SOURCE ARCHIVE REPRODUCIBILITY ====="
+"$ROOT/tests/test_source_archive.sh"
+
 echo "public source sanity check: PASS"
