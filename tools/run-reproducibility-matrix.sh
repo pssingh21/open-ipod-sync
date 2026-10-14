@@ -230,6 +230,8 @@ build_profile()
     local home_dir="$work_root/home-$label"
     local tmp_dir="$work_root/tmp-$label"
     local fake_bin="$work_root/no-git-bin"
+    local toolchain_view="$work_root/toolchain-view"
+    local toolchain_manifest="$OUTPUT_ROOT/materials/toolchain-$label.json"
     local bundle="$OUTPUT_ROOT/builder-$label"
 
     echo
@@ -251,6 +253,24 @@ build_profile()
         "$home_dir" \
         "$tmp_dir" \
         "$fake_bin"
+
+    echo
+    echo "===== CREATE $label DECLARED TOOLCHAIN VIEW ====="
+
+    /usr/bin/python3 \
+        "$ROOT/tools/create-toolchain-view.py" \
+        --output-dir "$toolchain_view" \
+        --manifest "$toolchain_manifest"
+
+    [[ -d "$toolchain_view" ]] || {
+        echo "ERROR: builder $label toolchain view missing" >&2
+        exit 1
+    }
+
+    [[ -f "$toolchain_manifest" ]] || {
+        echo "ERROR: builder $label toolchain manifest missing" >&2
+        exit 1
+    }
 
     tar \
         -xf "$ARCHIVE" \
@@ -302,7 +322,7 @@ NO_GIT
         cd "$source_root"
 
         "$NETWORK_HELPER" /usr/bin/env -i \
-            PATH="$fake_bin:$SYSTEM_PATH" \
+            PATH="$fake_bin:$toolchain_view" \
             HOME="$home_dir" \
             TMPDIR="$tmp_dir" \
             TZ="$timezone" \
@@ -351,7 +371,7 @@ NO_GIT
     echo "===== GENERATE $label SUPPLY-CHAIN METADATA ====="
 
     "$NETWORK_HELPER" /usr/bin/env -i \
-        PATH="$fake_bin:$SYSTEM_PATH" \
+        PATH="$fake_bin:$toolchain_view" \
         HOME="$home_dir" \
         TMPDIR="$tmp_dir" \
         TZ="$timezone" \
@@ -402,7 +422,7 @@ NO_GIT
     echo "===== CAPTURE $label BUILD MATERIALS ====="
 
     "$NETWORK_HELPER" /usr/bin/env -i \
-        PATH="$fake_bin:$SYSTEM_PATH" \
+        PATH="$fake_bin:$toolchain_view" \
         HOME="$home_dir" \
         TMPDIR="$tmp_dir" \
         TZ="$timezone" \
@@ -511,6 +531,158 @@ for name in "${NAMES_A[@]}"; do
     printf '%-42s PASS\n' "$name"
 done
 
+
+echo
+echo "===== VERIFY DECLARED TOOLCHAIN VIEWS ====="
+
+TOOLCHAIN_A="$OUTPUT_ROOT/materials/toolchain-a.json"
+TOOLCHAIN_B="$OUTPUT_ROOT/materials/toolchain-b.json"
+
+[[ -f "$TOOLCHAIN_A" ]] || {
+    echo "ERROR: builder A toolchain manifest missing" >&2
+    exit 1
+}
+
+[[ -f "$TOOLCHAIN_B" ]] || {
+    echo "ERROR: builder B toolchain manifest missing" >&2
+    exit 1
+}
+
+cmp -s \
+    "$TOOLCHAIN_A" \
+    "$TOOLCHAIN_B" || {
+        echo "ERROR: builder toolchain views differ" >&2
+
+        diff -u \
+            "$TOOLCHAIN_A" \
+            "$TOOLCHAIN_B" \
+            >&2 || true
+
+        exit 1
+    }
+
+python3 - \
+    "$TOOLCHAIN_A" <<'PYTOOLCHAIN'
+import json
+import sys
+from pathlib import Path
+
+document = json.loads(
+    Path(sys.argv[1]).read_text()
+)
+
+if document.get("schema") != (
+    "open-ipod-sync-toolchain-view-v1"
+):
+    raise SystemExit(
+        "ERROR: unexpected toolchain-view schema"
+    )
+
+policy = document.get(
+    "policy",
+    {},
+)
+
+if policy.get(
+    "ambient_path_used"
+) is not False:
+    raise SystemExit(
+        "ERROR: ambient PATH permitted by toolchain policy"
+    )
+
+if policy.get(
+    "developer_local_roots_allowed"
+) is not False:
+    raise SystemExit(
+        "ERROR: developer-local executable roots permitted"
+    )
+
+commands = document.get(
+    "commands",
+    [],
+)
+
+if len(commands) < 40:
+    raise SystemExit(
+        "ERROR: unexpectedly small declared toolchain"
+    )
+
+seen = set()
+
+for record in commands:
+    command = record.get("command")
+    target = record.get("target")
+    package = record.get("package")
+    version = record.get(
+        "package_version"
+    )
+
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            command,
+            target,
+            package,
+            version,
+        )
+    ):
+        raise SystemExit(
+            "ERROR: incomplete toolchain record"
+        )
+
+    if command in seen:
+        raise SystemExit(
+            f"ERROR: duplicate command: {command}"
+        )
+
+    seen.add(command)
+
+    if target.startswith(
+        (
+            "/usr/local/",
+            "/home/",
+            "/opt/",
+            "/tmp/",
+        )
+    ):
+        raise SystemExit(
+            "ERROR: developer/local executable "
+            f"entered toolchain: {command} -> {target}"
+        )
+
+required = {
+    "bash",
+    "dpkg-deb",
+    "dpkg-shlibdeps",
+    "g++",
+    "gcc",
+    "make",
+    "pkg-config",
+    "python3",
+    "readelf",
+    "strip",
+}
+
+missing = sorted(
+    required - seen
+)
+
+if missing:
+    raise SystemExit(
+        "ERROR: required declared tools missing: "
+        f"{missing}"
+    )
+
+print(
+    "declared toolchain commands:",
+    len(commands),
+)
+print("ambient PATH excluded: PASS")
+print("developer-local tool roots excluded: PASS")
+print("Debian package ownership: PASS")
+PYTOOLCHAIN
+
+echo "builder A/B declared toolchains: BYTE-IDENTICAL"
 
 echo
 echo "===== VERIFY BUILD-MATERIALS MANIFESTS ====="
@@ -691,6 +863,9 @@ echo "builder A:               ISOLATED"
 echo "builder B:               ISOLATED"
 echo "metadata A/B:            ISOLATED"
 echo "build materials A/B:      BYTE-IDENTICAL"
+echo "declared toolchain A/B:    BYTE-IDENTICAL"
+echo "ambient PATH:              EXCLUDED"
+echo "developer-local tools:     EXCLUDED"
 
 echo
 echo "========================================================================"
