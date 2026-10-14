@@ -61,7 +61,7 @@ rm -f /tmp/ipod-sync-zlib-check
 
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || echo "WARNING: only Debian 11 amd64 has been validated so far; building for $ARCH"
-VER="0.2.0~alpha4"
+VER="0.2.0~alpha5"
 PKG="ipod-sync_${VER}_${ARCH}"
 BUILD="$ROOT/build/$PKG"
 LIBSRC="$ROOT/build/libgpod-src"
@@ -169,7 +169,7 @@ case "$cmd" in
   recover-check) ensure_ro_mount; exec python3 "$APP" --mount "$IPOD_SYNC_MOUNT" --recover-check "$@" ;;
   recover) ensure_ro_mount; exec python3 "$APP" --mount "$IPOD_SYNC_MOUNT" --recover "$@" ;;
   doctor)
-    echo "ipod-sync 0.2.0-alpha.4 doctor"; echo "source: $IPOD_SYNC_SOURCE"; echo "mount:  $IPOD_SYNC_MOUNT"
+    echo "ipod-sync 0.2.0-alpha.5 doctor"; echo "source: $IPOD_SYNC_SOURCE"; echo "mount:  $IPOD_SYNC_MOUNT"
     fail=0
     for x in python3 ifuse fusermount mountpoint findmnt idevice_id idevicepair ffmpeg ffprobe gcc pkg-config; do
       command -v "$x" >/dev/null && echo "  $x: PASS" || { echo "  $x: MISSING"; fail=1; }
