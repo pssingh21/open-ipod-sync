@@ -367,3 +367,100 @@ jobs:
 
           echo "PASS: Debian package is byte-for-byte reproducible"
 
+  package-lifecycle:
+    name: Debian 11 package lifecycle
+    needs: package-build-audit
+    runs-on: ubuntu-24.04
+
+    container:
+      image: debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install Debian 11 runtime dependencies
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+
+          cat > /etc/apt/sources.list <<'APT'
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye-updates main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260830T235959Z/ bullseye-security main
+          APT
+
+          cat > /etc/apt/apt.conf.d/80-ci-retries <<'APT'
+          Acquire::Retries "5";
+          Acquire::http::Timeout "60";
+          Acquire::https::Timeout "60";
+          APT
+
+          apt-get update
+
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git \
+            bash \
+            python3 \
+            diffutils \
+            ifuse \
+            libimobiledevice-utils \
+            usbmuxd \
+            ffmpeg \
+            gcc \
+            pkg-config \
+            libglib2.0-dev \
+            util-linux \
+            libc6 \
+            libglib2.0-0 \
+            libimobiledevice6 \
+            libplist3 \
+            libsqlite3-0 \
+            libxml2 \
+            zlib1g \
+            libusb-1.0-0
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download audited Debian package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipod-sync-debian11-amd64-${{ github.sha }}
+          path: lifecycle-artifact
+
+      - name: Verify audited artifact checksum
+        run: |
+          set -euo pipefail
+
+          (
+            cd lifecycle-artifact
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Run package lifecycle tests
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(
+            find lifecycle-artifact \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one audited Debian package" >&2
+            exit 1
+          fi
+
+          ./tools/test-package-lifecycle.sh "${packages[0]}"
+
