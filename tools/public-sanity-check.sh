@@ -72,6 +72,11 @@ then
 fi
 
 echo
+echo "===== REPRODUCIBILITY CLAIM SCOPE ====="
+PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT/tests/test_reproducibility_claims.py"
+
+echo
 echo "===== SOURCE ARCHIVE REPRODUCIBILITY ====="
 "$ROOT/tests/test_source_archive.sh"
 

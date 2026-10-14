@@ -854,3 +854,45 @@ runtime sanitizer smoke coverage.
 automated sanitizer smoke test because starting it can initiate the real
 libimobiledevice sync protocol with a physically connected device. Device
 communication is therefore kept outside this automated security test.
+
+<!-- PR4_BUILD_ISOLATION_SCOPE_BEGIN -->
+### Build isolation scope
+
+The Debian 11 reproducibility gate verifies more than a second package build.
+It reconstructs the package from a deterministic archive of the committed Git
+object and validates the following properties:
+
+- the source archive is byte-reproducible and contains no `.git` metadata;
+- the extracted rebuild cannot invoke Git;
+- independent builders use different build paths, `HOME`, `TMPDIR`, timezone,
+  locale, Python hash seed, umask, synthetic user identity, and make
+  parallelism;
+- the actual rebuild and metadata-generation processes run with socket/network
+  syscalls denied by a Linux seccomp filter;
+- inherited non-standard file descriptors are closed and socket-backed standard
+  descriptors are refused before the isolated process is started;
+- the ambient process environment is replaced with `env -i`;
+- executable lookup is restricted to an explicit toolchain view;
+- every executable in that view resolves to a Debian-package-owned system tool,
+  excluding developer-local paths such as `/usr/local`, home directories,
+  `/opt`, and temporary directories;
+- the source archive digest, Debian snapshot identity, pinned base-image
+  identity, build-package versions, pkg-config module versions, and important
+  tool versions are recorded as build materials;
+- the two isolated builders must report byte-identical build-material and
+  toolchain manifests; and
+- the resulting Debian package, SPDX SBOM, provenance, and checksum manifest
+  must be byte-for-byte identical.
+
+This is intentionally a narrower guarantee than a complete filesystem sandbox.
+The build can still read operating-system files outside the extracted source
+tree and can execute an absolute system path if build logic explicitly names
+one. System headers and libraries are therefore trusted through the pinned
+Debian base image, snapshot, installed package set, and recorded material
+identities rather than through per-file read-time content addressing.
+
+The project describes this property as a **reproducible, network-isolated,
+material-recorded, tool-resolution-confined build**. The current Debian 11
+baseline does not require Landlock or another filesystem-read sandbox, which
+keeps the reproducibility gate usable on the supported Linux 5.10 environment.
+<!-- PR4_BUILD_ISOLATION_SCOPE_END -->
