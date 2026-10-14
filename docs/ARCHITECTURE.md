@@ -626,3 +626,58 @@ rijndael.c
 This preserves security-test coverage without allowing CI or a local validation
 run to initiate an iPod sync session merely to exercise sanitizer
 instrumentation.
+
+<!-- PR4_REPRO_ISOLATION_MODEL_BEGIN -->
+## Reproducibility isolation model
+
+The reproducibility control plane separates acquisition from the actual
+comparison builds.
+
+CI first starts from the pinned Debian 11 container image and pinned Debian
+snapshot and installs the declared build dependencies. The reproducibility
+builders then operate on a deterministic archive of the committed source
+object. The archive contains no Git metadata and the rebuild environment
+deliberately makes Git unusable.
+
+Each comparison builder receives a different synthetic environment and runs
+with an empty inherited environment except for explicitly supplied values.
+Executable lookup is limited to a generated toolchain directory containing
+links only to Debian-package-owned system executables. Developer-local
+executable roots are excluded. The generated toolchain manifest records the
+real target, owning Debian package, and package version for every declared
+command.
+
+Before the package build is executed, `network-deny-exec` closes inherited
+non-standard descriptors, rejects socket-backed standard descriptors, sets
+`PR_SET_NO_NEW_PRIVS`, and installs a seccomp filter denying socket/network
+syscalls. The restriction is inherited by descendants of the build and
+metadata-generation process.
+
+The builders independently record a canonical build-material manifest covering:
+
+- source commit, `SOURCE_DATE_EPOCH`, and source-archive SHA-256;
+- pinned Debian snapshot identity;
+- pinned Debian base-image digest;
+- installed build-package versions and architecture;
+- relevant pkg-config module versions; and
+- compiler, linker, binutils, packaging, Python, gettext, make, and related
+  tool versions.
+
+The gate requires both the toolchain manifests and build-material manifests to
+be byte-identical before accepting the resulting package comparison. The
+Debian package, SPDX SBOM, provenance document, and checksum manifest must also
+match byte-for-byte.
+
+### Isolation boundary
+
+The reproducibility environment is not a general filesystem-read sandbox.
+Processes may still read system files and explicitly invoke absolute system
+paths. System headers, libraries, and operating-system files are trusted as
+materials of the pinned Debian image and package set instead of being
+individually content-addressed on every read.
+
+Landlock is therefore not a prerequisite for the Debian 11 reproducibility
+baseline. This preserves operation on the supported Linux 5.10 environment,
+where Landlock is not available, while keeping the implemented guarantees
+portable and directly testable.
+<!-- PR4_REPRO_ISOLATION_MODEL_END -->

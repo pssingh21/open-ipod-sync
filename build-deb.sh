@@ -62,8 +62,13 @@ else
 fi
 
 echo "libplist pkg-config module: $LIBPLIST_PKGCONFIG"
-printf '#include <zlib.h>\nint main(void){return 0;}\n' | gcc -x c - -lz -o /tmp/ipod-sync-zlib-check
-rm -f /tmp/ipod-sync-zlib-check
+(
+  zlib_check="$(mktemp "${TMPDIR:-/tmp}/ipod-sync-zlib-check.XXXXXX")"
+  trap 'rm -f "$zlib_check"' EXIT
+
+  printf '#include <zlib.h>\nint main(void){return 0;}\n' |
+    gcc -x c - -lz -o "$zlib_check"
+)
 
 command -v readelf >/dev/null 2>&1 || {
   echo "ERROR: missing build command: readelf (install binutils)" >&2

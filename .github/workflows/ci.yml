@@ -358,6 +358,49 @@ jobs:
           git -C "$GITHUB_WORKSPACE" rev-parse HEAD
           git -C "$GITHUB_WORKSPACE" log -1 --format='epoch=%ct date=%cI'
 
+      - name: Create deterministic commit source archive
+        run: |
+          set -euo pipefail
+
+          commit="$(git rev-parse HEAD)"
+          source_date_epoch="$(git log -1 --format=%ct)"
+
+          [[ "$commit" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: checked-out commit does not match workflow SHA" >&2
+            exit 1
+          }
+
+          ./tests/test_source_archive.sh
+
+          mkdir -p source-artifact
+
+          archive="source-artifact/open-ipod-sync-${commit}.tar"
+
+          ./tools/make-source-archive.sh \
+            "$archive" \
+            "$commit"
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$archive"
+          )"
+
+          [[ "$embedded_commit" == "$commit" ]] || {
+            echo "ERROR: source archive commit mismatch" >&2
+            exit 1
+          }
+
+          (
+            cd source-artifact
+            sha256sum "$(basename "$archive")" > SOURCE-SHA256SUMS
+            sha256sum -c SOURCE-SHA256SUMS
+          )
+
+          echo \
+            "REPRO_SOURCE_DATE_EPOCH=$source_date_epoch" \
+            >> "$GITHUB_ENV"
+
+          echo "deterministic source archive: PASS"
+
       - name: Download audited build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -376,193 +419,222 @@ jobs:
       - name: Build independent comparison package
         run: |
           set -euo pipefail
-          ./build-deb.sh
 
+          (
+            cd source-artifact
+            sha256sum -c SOURCE-SHA256SUMS
+          )
+
+          mapfile -t source_archives < <(
+            find source-artifact \
+              -maxdepth 1 \
+              -type f \
+              -name 'open-ipod-sync-*.tar' \
+              -print |
+            sort
+          )
+
+          [[ "${#source_archives[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one deterministic source archive" >&2
+            printf '%s\n' "${source_archives[@]}" >&2
+            exit 1
+          }
+
+          rm -rf reproducibility-matrix
+
+          ./tools/run-reproducibility-matrix.sh \
+            "${source_archives[0]}" \
+            "$GITHUB_SHA" \
+            "$REPRO_SOURCE_DATE_EPOCH" \
+            reproducibility-matrix \
+            "debian-11-amd64-snapshot-20260830T235959Z" \
+            "debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9"
+
+          cmp -s \
+            reproducibility-matrix/materials/builder-a.json \
+            reproducibility-matrix/materials/builder-b.json || {
+              echo "ERROR: isolated builder material manifests differ" >&2
+              exit 1
+            }
+
+          echo "isolated builder material manifests: PASS"
       - name: Generate independent SBOM and provenance
         run: |
           set -euo pipefail
 
-          mapfile -t rebuilt_packages < <(
-            find dist \
-              -maxdepth 1 \
-              -type f \
-              -name 'ipod-sync_*_amd64.deb' \
-              -print
-          )
+          rm -rf \
+            rebuilt-bundle \
+            rebuilt-bundle-alt
 
-          if [[ "${#rebuilt_packages[@]}" -ne 1 ]]; then
-            echo "ERROR: expected exactly one independently rebuilt package" >&2
-            exit 1
-          fi
+          cp -a \
+            reproducibility-matrix/builder-a \
+            rebuilt-bundle
 
-          mkdir -p rebuilt-bundle
+          cp -a \
+            reproducibility-matrix/builder-b \
+            rebuilt-bundle-alt
 
-          package_name="$(basename "${rebuilt_packages[0]}")"
-          cp "${rebuilt_packages[0]}" "rebuilt-bundle/$package_name"
+          for bundle in \
+              rebuilt-bundle \
+              rebuilt-bundle-alt
+          do
+            (
+              cd "$bundle"
 
-          git_commit="$(git rev-parse HEAD)"
-          source_date_epoch="$(git log -1 --format=%ct)"
+              sha256sum -c SHA256SUMS
 
-          python3 tools/generate-supply-chain-metadata.py \
-            "rebuilt-bundle/$package_name" \
-            --output-dir rebuilt-bundle \
-            --git-commit "$git_commit" \
-            --source-date-epoch "$source_date_epoch" \
-            --build-environment \
-              "debian-11-amd64-snapshot-20260830T235959Z"
+              mapfile -t names < <(
+                find . \
+                  -maxdepth 1 \
+                  -type f \
+                  -printf '%f\n' |
+                sort
+              )
 
-          (
-            cd rebuilt-bundle
-
-            mapfile -t checksum_files < <(
-              find . \
-                -maxdepth 1 \
-                -type f \
-                \( \
-                  -name '*.deb' -o \
-                  -name '*.spdx.json' -o \
-                  -name 'PROVENANCE.json' \
-                \) \
-                -printf '%f\n' |
-              sort
+              [[ "${#names[@]}" -eq 4 ]] || {
+                echo "ERROR: unexpected reproducibility bundle: $bundle" >&2
+                printf '%s\n' "${names[@]}" >&2
+                exit 1
+              }
             )
+          done
 
-            [[ "${#checksum_files[@]}" -eq 3 ]] || {
-              echo "ERROR: unexpected rebuilt supply-chain bundle" >&2
-              printf '%s\n' "${checksum_files[@]}" >&2
-              exit 1
-            }
-
-            sha256sum "${checksum_files[@]}" > SHA256SUMS
-          )
-
+          echo "two independent supply-chain bundles: PASS"
       - name: Scan downloaded and rebuilt artifact privacy boundaries
         run: |
           set -euo pipefail
-          python3 tools/privacy-scan.py baseline rebuilt-bundle
+          python3 tools/privacy-scan.py baseline rebuilt-bundle rebuilt-bundle-alt
+          python3 tools/privacy-scan.py source-artifact
 
       - name: Verify reproducible Debian package and supply-chain metadata
         run: |
           set -euo pipefail
 
-          mapfile -t baseline_packages < <(
+          for bundle in \
+              baseline \
+              rebuilt-bundle \
+              rebuilt-bundle-alt
+          do
+            [[ -d "$bundle" ]] || {
+              echo "ERROR: missing reproducibility bundle: $bundle" >&2
+              exit 1
+            }
+
+            (
+              cd "$bundle"
+              sha256sum -c SHA256SUMS
+            )
+          done
+
+          mapfile -t baseline_names < <(
             find baseline \
               -maxdepth 1 \
               -type f \
-              -name 'ipod-sync_*_amd64.deb' \
-              -print
+              -printf '%f\n' |
+            sort
           )
 
-          mapfile -t rebuilt_packages < <(
+          mapfile -t rebuilt_names < <(
             find rebuilt-bundle \
               -maxdepth 1 \
               -type f \
-              -name 'ipod-sync_*_amd64.deb' \
-              -print
+              -printf '%f\n' |
+            sort
           )
 
-          mapfile -t baseline_sboms < <(
-            find baseline \
+          mapfile -t alternate_names < <(
+            find rebuilt-bundle-alt \
               -maxdepth 1 \
               -type f \
-              -name '*.spdx.json' \
-              -print
+              -printf '%f\n' |
+            sort
           )
 
-          mapfile -t rebuilt_sboms < <(
-            find rebuilt-bundle \
-              -maxdepth 1 \
-              -type f \
-              -name '*.spdx.json' \
-              -print
-          )
-
-          [[ "${#baseline_packages[@]}" -eq 1 ]] || {
-            echo "ERROR: expected exactly one baseline Debian package" >&2
+          [[ "${#baseline_names[@]}" -eq 4 ]] || {
+            echo "ERROR: baseline bundle should contain exactly four files" >&2
+            printf '%s\n' "${baseline_names[@]}" >&2
             exit 1
           }
 
-          [[ "${#rebuilt_packages[@]}" -eq 1 ]] || {
-            echo "ERROR: expected exactly one rebuilt Debian package" >&2
+          [[ "${#rebuilt_names[@]}" -eq 4 ]] || {
+            echo "ERROR: rebuilt bundle should contain exactly four files" >&2
+            printf '%s\n' "${rebuilt_names[@]}" >&2
             exit 1
           }
 
-          [[ "${#baseline_sboms[@]}" -eq 1 ]] || {
-            echo "ERROR: expected exactly one baseline SPDX SBOM" >&2
+          [[ "${#alternate_names[@]}" -eq 4 ]] || {
+            echo "ERROR: alternate bundle should contain exactly four files" >&2
+            printf '%s\n' "${alternate_names[@]}" >&2
             exit 1
           }
 
-          [[ "${#rebuilt_sboms[@]}" -eq 1 ]] || {
-            echo "ERROR: expected exactly one rebuilt SPDX SBOM" >&2
-            exit 1
-          }
+          diff -u \
+            <(printf '%s\n' "${baseline_names[@]}") \
+            <(printf '%s\n' "${rebuilt_names[@]}")
 
-          [[ -f baseline/PROVENANCE.json ]] || {
-            echo "ERROR: baseline provenance missing" >&2
-            exit 1
-          }
-
-          [[ -f rebuilt-bundle/PROVENANCE.json ]] || {
-            echo "ERROR: rebuilt provenance missing" >&2
-            exit 1
-          }
-
-          [[ -f baseline/SHA256SUMS ]] || {
-            echo "ERROR: baseline SHA256SUMS missing" >&2
-            exit 1
-          }
-
-          [[ -f rebuilt-bundle/SHA256SUMS ]] || {
-            echo "ERROR: rebuilt SHA256SUMS missing" >&2
-            exit 1
-          }
-
-          echo "===== BASELINE BUNDLE ====="
-          (
-            cd baseline
-            sha256sum -c SHA256SUMS
-          )
+          diff -u \
+            <(printf '%s\n' "${rebuilt_names[@]}") \
+            <(printf '%s\n' "${alternate_names[@]}")
 
           echo
-          echo "===== INDEPENDENT REBUILD BUNDLE ====="
-          (
-            cd rebuilt-bundle
-            sha256sum -c SHA256SUMS
-          )
+          echo "===== BASELINE vs SOURCE-ARCHIVE BUILDER A ====="
+
+          for name in "${baseline_names[@]}"; do
+            cmp -s \
+              "baseline/$name" \
+              "rebuilt-bundle/$name" || {
+                echo "ERROR: baseline differs from builder A: $name" >&2
+                exit 1
+              }
+
+            printf '%-42s PASS\n' "$name"
+          done
 
           echo
-          echo "===== BYTE-FOR-BYTE REPRODUCIBILITY ====="
+          echo "===== BUILDER A vs VARIED-ENVIRONMENT BUILDER B ====="
 
-          cmp -s "${baseline_packages[0]}" "${rebuilt_packages[0]}" || {
-            echo "ERROR: Debian package is not byte-for-byte reproducible" >&2
-            exit 1
-          }
+          for name in "${rebuilt_names[@]}"; do
+            cmp -s \
+              "rebuilt-bundle/$name" \
+              "rebuilt-bundle-alt/$name" || {
+                echo "ERROR: environment matrix differs: $name" >&2
+                exit 1
+              }
 
-          echo "Debian package: PASS"
-
-          cmp -s "${baseline_sboms[0]}" "${rebuilt_sboms[0]}" || {
-            echo "ERROR: SPDX SBOM is not byte-for-byte reproducible" >&2
-            exit 1
-          }
-
-          echo "SPDX SBOM:     PASS"
-
-          cmp -s baseline/PROVENANCE.json rebuilt-bundle/PROVENANCE.json || {
-            echo "ERROR: provenance metadata is not byte-for-byte reproducible" >&2
-            exit 1
-          }
-
-          echo "provenance:     PASS"
-
-          cmp -s baseline/SHA256SUMS rebuilt-bundle/SHA256SUMS || {
-            echo "ERROR: SHA256SUMS is not byte-for-byte reproducible" >&2
-            exit 1
-          }
-
-          echo "SHA256SUMS:     PASS"
+            printf '%-42s PASS\n' "$name"
+          done
 
           echo
+          echo "============================================================"
           echo "PASS: complete audited supply-chain bundle is reproducible"
+          echo "PASS: varied build environments are byte-identical"
+          echo "============================================================"
+      - name: Configure pinned Debian 11 snapshot
+        run: |
+          set -euo pipefail
+
+          # Debian 11 Bullseye reached LTS EOL in August 2026.
+          #
+          # Pin CI to a coherent Debian Snapshot from immediately before EOL.
+          # This avoids retired/archive mirrors whose package indexes may refer
+          # to binary files that are no longer present in the pool.
+          rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+
+          cat > /etc/apt/sources.list <<'APT'
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260830T235959Z/ bullseye-updates main
+          deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260830T235959Z/ bullseye-security main
+          APT
+
+          # snapshot.debian.org can occasionally return transient gateway
+          # errors. Apply retries to both apt update and package downloads.
+          cat > /etc/apt/apt.conf.d/80-ci-retries <<'APT'
+          Acquire::Retries "5";
+          Acquire::http::Timeout "60";
+          Acquire::https::Timeout "60";
+          APT
+
+          apt-get update
 
   package-lifecycle:
     name: Debian 11 package lifecycle
@@ -603,6 +675,7 @@ jobs:
           APT
 
           apt-get update
+
 
       - name: Install Debian 11 runtime dependencies
         run: |

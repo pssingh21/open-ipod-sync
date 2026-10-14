@@ -473,3 +473,30 @@ For future releases, the human checklist is intentionally short:
 ```
 
 If all eight items are satisfied, release publication is complete.
+
+<!-- PR4_REPRO_GATE_INTERPRETATION_BEGIN -->
+## Interpreting the reproducibility gate
+
+A green **Debian 11 reproducibility gate** means that the audited release
+package has been independently reconstructed from a deterministic committed
+source archive and has survived all of the following checks:
+
+- no `.git` metadata is present in the rebuild source;
+- Git execution is disabled during the extracted-source rebuild;
+- two deliberately different build environments produce identical output;
+- socket/network syscalls are kernel-denied during the comparison builds;
+- the ambient environment and developer-local executable lookup paths are
+  excluded;
+- the declared toolchain consists of Debian-package-owned executables;
+- recorded build-material and toolchain manifests agree between builders; and
+- the `.deb`, SPDX SBOM, provenance, and checksum manifest are byte-identical.
+
+For release review, this demonstrates strong reproducibility and build-input
+control. It does **not** assert a filesystem-read sandbox: comparison-build
+processes can still read operating-system files supplied by the pinned Debian
+environment and can execute explicitly named absolute system paths.
+
+If the reproducibility gate fails, do not publish a release until the differing
+source identity, material identity, toolchain identity, metadata, or package
+bytes have been explained and the gate is green again.
+<!-- PR4_REPRO_GATE_INTERPRETATION_END -->
