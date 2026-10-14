@@ -315,6 +315,12 @@ jobs:
             -printf '%f\n' |
           sort
 
+      - name: Scan downloaded CI bundle privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py ci-bundle
+
       - name: Verify CI bundle and attestations
         shell: bash
         env:
@@ -516,6 +522,12 @@ jobs:
             -printf '%f\n' |
           sort
 
+      - name: Scan verified release bundle privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py release
+
       - name: Upload verified release bundle
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -596,6 +608,12 @@ jobs:
           )
 
           echo "publication boundary: PASS"
+
+      - name: Scan publication privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py release
 
       - name: Create and push annotated tag
         shell: bash
@@ -745,6 +763,11 @@ jobs:
       contents: read
 
     steps:
+      - name: Check out exact release commit for verification tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download published assets fresh
         shell: bash
         env:
@@ -764,6 +787,12 @@ jobs:
             -type f \
             -printf '%f\n' |
           sort
+
+      - name: Scan published release privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py published
 
       - name: Verify published checksums and release attestations
         shell: bash

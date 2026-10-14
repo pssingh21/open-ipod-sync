@@ -33,68 +33,15 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_apply_transaction_orchestrat
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_recovery_state_machine.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_cli_safety_routing.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_supply_chain_metadata.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_privacy_scan.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_privacy_boundary_workflows.py"
 
-# Old private migration implementation must not exist in public sources.
-if grep -R -a -nE \
-  --exclude='public-sanity-check.sh' \
-  --exclude-dir='.git' \
-  'FROZEN_(PREIMAGE|ARTIFACT_HASHES)|TEMPLATE_FALLBACK_PID|audited-frozen-v4|--no-frozen-v4' \
-  "$ROOT"
-then
-  echo "ERROR: private migration machinery found" >&2
-  exit 1
-fi
-
-# Reject known/private development-machine fingerprints.
-python3 - "$ROOT" <<'PYSCAN'
-from pathlib import Path
-import re
-import sys
-
-root = Path(sys.argv[1])
-
-patterns = [
-    re.compile(rb'(?<![A-Za-z0-9_./-])/home/[A-Za-z0-9_.-]+/'),
-    re.compile(rb'(?<![A-Za-z0-9_./-])/Users/[A-Za-z0-9_.-]+/'),
-    re.compile(rb'syn_admin'),
-    re.compile(rb'192\.168\.1\.161'),
-    re.compile(rb'ipod-test-add'),
-    re.compile(rb'rename-601'),
-]
-
-skip_names = {"public-sanity-check.sh"}
-
-failed = False
-
-for path in root.rglob("*"):
-    if not path.is_file():
-        continue
-
-    try:
-        rel = path.relative_to(root)
-    except ValueError:
-        continue
-
-    if ".git" in rel.parts:
-        continue
-
-    if path.name in skip_names:
-        continue
-
-    try:
-        data = path.read_bytes()
-    except OSError:
-        continue
-
-    for pattern in patterns:
-        if pattern.search(data):
-            print(f"{path}: private/development fingerprint matched: {pattern.pattern!r}")
-            failed = True
-
-if failed:
-    print("ERROR: private/development fingerprint found", file=sys.stderr)
-    raise SystemExit(1)
-PYSCAN
+# Legacy private-development and migration fingerprints are enforced by
+# tools/privacy-scan.py below so there is one canonical privacy policy.
+# Enforce the same canonical privacy boundary used for generated
+# CI and release artifacts. The scanner never follows symlinks and
+# skips only Git metadata.
+python3 "$ROOT/tools/privacy-scan.py" "$ROOT"
 
 # Public source tree must not contain compiled libgpod artifacts.
 if find "$ROOT" \

@@ -487,3 +487,53 @@ published release bytes come from exact green CI
 ```
 
 These constraints are more important than expanding synchronization features.
+
+## Artifact privacy boundary
+
+Public-source validation, package auditing, CI artifact publication, and release
+publication share one canonical privacy policy implemented by
+`tools/privacy-scan.py`.
+
+The release path is intentionally ordered as:
+
+```text
+source validation
+    ↓
+build
+    ↓
+package audit
+    ↓
+SBOM / provenance / checksum generation
+    ↓
+complete artifact privacy scan
+    ↓
+CI artifact upload
+    ↓
+reproducibility and lifecycle verification
+    ↓
+release-bundle construction
+    ↓
+release-bundle privacy scan
+    ↓
+publication
+    ↓
+fresh download
+    ↓
+published-artifact privacy scan and integrity verification
+```
+
+The privacy boundary scans both container bytes and relevant expanded content.
+For Debian packages this includes the raw `.deb`, package payload, and control
+metadata. Supported tar and ZIP archives are inspected member-by-member without
+extracting them into the source tree.
+
+Filesystem symlinks are not followed. Link names and link targets are scanned as
+data instead. This prevents the privacy scanner from crossing the source
+boundary through a symlink.
+
+The scanner reports rule names and logical artifact locations without printing
+the matched secret or private value itself.
+
+A privacy scan failure prevents subsequent artifact upload or release
+publication. The configured source music filesystem is never used for staging
+or scanner state and remains subject to the kernel read-only source invariant.

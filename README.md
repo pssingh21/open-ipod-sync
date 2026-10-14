@@ -636,6 +636,43 @@ Release artifacts are checked to avoid unintentionally publishing items such as:
 
 Your music library is processed locally by the synchronization tool. The synchronization path does not require uploading the music collection to a remote service.
 
+
+### Artifact privacy boundary
+
+Public artifacts are scanned with `tools/privacy-scan.py` before they are
+uploaded or published.
+
+The same canonical scanner is used for:
+
+- the checked-out public source tree;
+- generated Debian packages, including package payload and control metadata;
+- SPDX SBOM and provenance files;
+- checksum manifests and checksum sidecars;
+- CI artifact bundles;
+- release bundles before publication;
+- freshly downloaded published release assets;
+- supported tar and ZIP archives, including their member contents.
+
+The scanner rejects known private-development fingerprints, developer home
+paths, RFC1918 private IP addresses, common credential/token formats, private
+key material, Apple pairing/private-key material, and contextual device
+identifiers.
+
+Scanning is fail-closed: an unreadable or uninspectable supported artifact
+causes the privacy gate to fail rather than silently skipping it.
+
+Filesystem symlinks are not followed. Their names and targets are inspected as
+data, so privacy scanning cannot escape through a symlink into another
+filesystem such as the configured NAS source.
+
+The source music tree remains strictly read-only. Privacy scanning only reads
+source/public artifacts and never renames, deletes, chmods, stages into, or
+otherwise modifies the configured source filesystem.
+
+Generated checksum sidecars are also required to contain artifact basenames
+only. This prevents checkout paths such as developer home directories from
+being embedded in otherwise public build metadata.
+
 ## Reproducible builds
 
 The Debian build uses deterministic build inputs and normalized timestamps.
