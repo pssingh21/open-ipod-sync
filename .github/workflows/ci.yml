@@ -63,3 +63,95 @@ jobs:
           fi
 
           echo "source tree remains clean: PASS"
+
+  package-build-audit:
+    name: Debian 11 package build + audit
+    needs:
+      - public-source-sanity
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    container:
+      image: debian:11
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install Debian 11 build dependencies
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git \
+            bash \
+            python3 \
+            build-essential \
+            dpkg-dev \
+            pkg-config \
+            intltool \
+            gettext \
+            libglib2.0-dev \
+            libsqlite3-dev \
+            libimobiledevice-dev \
+            libplist-dev \
+            libxml2-dev \
+            zlib1g-dev \
+            libusb-1.0-0-dev \
+            file
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify Debian build environment
+        run: |
+          set -euo pipefail
+
+          cat /etc/debian_version
+          python3 --version
+          gcc --version | head -n 1
+          dpkg --print-architecture
+
+          python3 --version | grep -E '^Python 3\.9\.'
+          test "$(dpkg --print-architecture)" = "amd64"
+
+          echo "Debian 11 amd64 build environment: PASS"
+
+      - name: Run source sanity checks on Debian 11
+        run: |
+          set -euo pipefail
+          ./tools/public-sanity-check.sh
+
+      - name: Build Debian package
+        run: |
+          set -euo pipefail
+          ./build-deb.sh
+
+      - name: Audit Debian package
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(
+            find dist \
+              -maxdepth 1 \
+              -type f \
+              -name 'ipod-sync_*_amd64.deb' \
+              -print
+          )
+
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "ERROR: expected exactly one Debian package; found ${#packages[@]}" >&2
+            printf '%s\n' "${packages[@]}"
+            exit 1
+          fi
+
+          ./tools/audit-deb.sh "${packages[0]}"
