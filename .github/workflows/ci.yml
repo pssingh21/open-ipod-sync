@@ -758,82 +758,82 @@ jobs:
           python3 - \
             "${{ matrix.os }}" \
             "$DEPENDS" <<'PYDEP'
-import re
-import sys
+          import re
+          import sys
 
-host = sys.argv[1]
-raw = sys.argv[2]
+          host = sys.argv[1]
+          raw = sys.argv[2]
 
-names = []
+          names = []
 
-for group in raw.split(","):
-    token = group.strip()
+          for group in raw.split(","):
+              token = group.strip()
 
-    if "|" in token:
-        raise SystemExit(
-            f"ERROR: unexpected alternative dependency: {token}"
-        )
+              if "|" in token:
+                  raise SystemExit(
+                      f"ERROR: unexpected alternative dependency: {token}"
+                  )
 
-    name = re.split(r"\s|\(", token, maxsplit=1)[0]
+              name = re.split(r"\s|\(", token, maxsplit=1)[0]
 
-    if not name:
-        raise SystemExit(
-            f"ERROR: could not parse dependency: {token!r}"
-        )
+              if not name:
+                  raise SystemExit(
+                      f"ERROR: could not parse dependency: {token!r}"
+                  )
 
-    names.append(name)
+              names.append(name)
 
-print("dependency package names:")
-for name in names:
-    print(f"  {name}")
+          print("dependency package names:")
+          for name in names:
+              print(f"  {name}")
 
-common = {
-    "libplist-2.0-4",
-}
+          common = {
+              "libplist-2.0-4",
+          }
 
-if host == "ubuntu-24.04":
-    required = common | {
-        "libimobiledevice6",
-    }
+          if host == "ubuntu-24.04":
+              required = common | {
+                  "libimobiledevice6",
+              }
 
-    forbidden = {
-        "libplist3",
-        "libimobiledevice-1.0-6",
-    }
+              forbidden = {
+                  "libplist3",
+                  "libimobiledevice-1.0-6",
+              }
 
-elif host == "ubuntu-26.04":
-    required = common | {
-        "libimobiledevice-1.0-6",
-    }
+          elif host == "ubuntu-26.04":
+              required = common | {
+                  "libimobiledevice-1.0-6",
+              }
 
-    forbidden = {
-        "libplist3",
-        "libimobiledevice6",
-    }
+              forbidden = {
+                  "libplist3",
+                  "libimobiledevice6",
+              }
 
-else:
-    raise SystemExit(
-        f"ERROR: unexpected host matrix member: {host}"
-    )
+          else:
+              raise SystemExit(
+                  f"ERROR: unexpected host matrix member: {host}"
+              )
 
-missing = required - set(names)
+          missing = required - set(names)
 
-if missing:
-    raise SystemExit(
-        f"ERROR: missing host ABI dependencies: "
-        f"{sorted(missing)}"
-    )
+          if missing:
+              raise SystemExit(
+                  f"ERROR: missing host ABI dependencies: "
+                  f"{sorted(missing)}"
+              )
 
-present_forbidden = forbidden & set(names)
+          present_forbidden = forbidden & set(names)
 
-if present_forbidden:
-    raise SystemExit(
-        f"ERROR: stale distro-specific ABI dependencies: "
-        f"{sorted(present_forbidden)}"
-    )
+          if present_forbidden:
+              raise SystemExit(
+                  f"ERROR: stale distro-specific ABI dependencies: "
+                  f"{sorted(present_forbidden)}"
+              )
 
-print(f"{host} generated ABI package names: PASS")
-PYDEP
+          print(f"{host} generated ABI package names: PASS")
+          PYDEP
 
       - name: Install lifecycle runtime tools
         shell: bash
