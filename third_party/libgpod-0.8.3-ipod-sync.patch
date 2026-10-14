@@ -56,4 +56,16 @@ diff -ruN -x .deps -x .libs -x autom4te.cache -x config.log -x config.status -x 
 +        /* POC: preserve existing ArtworkDB and mhii IDs */
      }
  #endif
- 
+
+diff -ruN -x .deps -x .libs -x autom4te.cache -x config.log -x config.status -x libtool -x Makefile -x '*.o' -x '*.lo' -x '*.la' -x '*.lai' -x '*.so' -x '*.so.*' -x '*.a' -x stamp-h1 -x '*.pyc' -x __pycache__ libgpod-0.8.3/src/itdb_sqlite.c libgpod-0.8.3-noart-podcast/src/itdb_sqlite.c
+--- libgpod-0.8.3/src/itdb_sqlite.c
++++ libgpod-0.8.3-noart-podcast/src/itdb_sqlite.c
+@@ -2281,5 +2281,3 @@
+-    tmpdir = g_build_path(g_get_tmp_dir(), tmpnam(NULL), NULL);
+-    if (g_mkdir(tmpdir, 0755) != 0) {
+-	g_set_error (&fexp->error, G_FILE_ERROR, g_file_error_from_errno(errno),
+-		     "Could not create temporary directory '%s': %s",
+-		     tmpdir, strerror(errno));
++    tmpdir = g_dir_make_tmp("libgpod-XXXXXX", &fexp->error);
++    if (tmpdir == NULL) {
++	g_prefix_error(&fexp->error, "Could not create temporary directory: ");
