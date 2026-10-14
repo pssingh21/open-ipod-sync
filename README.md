@@ -280,8 +280,8 @@ each GitHub release rather than being stored inside the tagged source tree.
 - Device compatibility outside the tested iPod touch 2G / iOS 4.2.1 combination
   is not yet established.
 - The current prebuilt package targets Debian 11 amd64.
-- Legacy libgpod code still contains an upstream `tmpnam()` usage that should be
-  replaced in a future release.
+- The bundled libgpod code is legacy software and may require additional
+  hardening beyond the changes maintained here.
 
 ## Contributing
 
