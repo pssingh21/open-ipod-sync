@@ -476,17 +476,23 @@ changelog = (
 
 for token in (
     "Verify distro ifuse safety contract",
-    "Install upstream ifuse 1.2.1 on Ubuntu 26.04",
-    'if: matrix.os == \'ubuntu-26.04\'',
-    "unsafe ifuse version detected: 1.2.0",
-    "f7eac74",
-    "/usr/local/bin/ifuse",
-    "Ubuntu 26.04 distro ifuse 1.2.0 ",
-    "rejection: PASS",
-    "Ubuntu 26.04 upstream ifuse 1.2.1 ",
-    "acceptance: PASS",
+    "Prepare host through repository bootstrap",
+    "sudo ./tools/prepare-host.sh",
+    "known-unsafe distro ifuse rejection: PASS",
+    "safe distro ifuse acceptance: PASS",
+    "prepared active ifuse accepted: PASS",
 ):
     assert token in ci, token
+
+
+# CI must no longer contain its own second implementation of the upstream
+# ifuse source-build workaround. Host remediation belongs to
+# tools/prepare-host.sh and is exercised through that repository-owned path.
+for stale in (
+    "Install upstream ifuse 1.2.1 on Ubuntu 26.04",
+    "git clone --depth 1 --branch 1.2.1",
+):
+    assert stale not in ci, stale
 
 
 for token in (
