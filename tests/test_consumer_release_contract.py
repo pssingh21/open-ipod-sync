@@ -181,6 +181,35 @@ for token in (
     )
 
 
+# Reproducibility checksum manifests intentionally have different scopes.
+#
+# The audited baseline SHA256SUMS covers six canonical CI payloads, while each
+# isolated rebuild SHA256SUMS covers the three reproducible core payloads.
+# CI must therefore derive a baseline core manifest rather than compare the
+# full baseline checksum manifest byte-for-byte with a rebuild manifest.
+for token in (
+    "baseline reproducible core should contain exactly three payload files",
+    "rebuilt core should contain exactly three payload files",
+    "alternate core should contain exactly three payload files",
+    "baseline-core-SHA256SUMS",
+    "baseline-derived core SHA256SUMS vs builder A: PASS",
+    "baseline-derived core SHA256SUMS vs builder B: PASS",
+):
+    require(
+        CI,
+        token,
+        "reproducibility checksum-scope contract",
+    )
+
+if (
+    "baseline reproducible core should contain exactly four files"
+    in CI
+):
+    raise SystemExit(
+        "ERROR: reproducibility core still treats the "
+        "full-scope SHA256SUMS as a core payload"
+    )
+
 # Consumer-facing documentation is part of the release contract.
 for token in (
     "## Independently verify a release",
