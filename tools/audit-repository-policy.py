@@ -705,22 +705,16 @@ def audit_historical_releases(repo: str) -> None:
         else:
             legacy.append(tag)
 
+    # Release/tag names originate from remote GitHub data. The policy audit
+    # only needs aggregate classification, so do not echo remote values.
     print(
-        "immutable historical releases:",
-        ", ".join(
-            sorted(immutable)
-        )
-        if immutable
-        else "none",
+        "immutable historical release count:",
+        len(immutable),
     )
 
     print(
-        "legacy pre-enforcement releases:",
-        ", ".join(
-            sorted(legacy)
-        )
-        if legacy
-        else "none",
+        "legacy pre-enforcement release count:",
+        len(legacy),
     )
 
 
