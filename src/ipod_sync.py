@@ -41,6 +41,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 import selectors
 import sqlite3
@@ -309,7 +310,62 @@ def recheck_source_guard(guard: SourceGuard):
     ):
         raise SyncError("SOURCE WRITE BARRIER FAILED: source mount identity changed during this run")
 
+def parse_ifuse_version(output: str) -> tuple[int, int, int]:
+    """Extract the upstream semantic version reported by ifuse."""
+    match = re.search(
+        r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)",
+        output,
+    )
+
+    if match is None:
+        raise SyncError(
+            "unable to determine ifuse version from "
+            "ifuse --version output"
+        )
+
+    return tuple(
+        int(part)
+        for part in match.groups()
+    )
+
+
+def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
+    """Return the installed ifuse semantic version without touching the device."""
+    binary = binary or require_cmd("ifuse")
+
+    result = run(
+        [binary, "--version"],
+        check=False,
+    )
+
+    if result.returncode != 0:
+        raise SyncError(
+            "unable to determine ifuse version: "
+            "ifuse --version failed"
+        )
+
+    return parse_ifuse_version(
+        result.stdout or ""
+    )
+
+
+def require_safe_ifuse(binary: str | None = None) -> tuple[int, int, int]:
+    """Reject upstream ifuse 1.2.0 before trusting any device filesystem data."""
+    version = ifuse_version(binary)
+
+    if version == (1, 2, 0):
+        raise SyncError(
+            "unsafe ifuse version detected: 1.2.0; "
+            "upstream warns that ifuse 1.2.0 can cause data corruption. "
+            "Unmount any existing ifuse mount and install ifuse 1.2.1 "
+            "or later before accessing the iPod"
+        )
+
+    return version
+
+
 def require_ifuse_mount(mount: Path, writable: bool | None = None):
+    require_safe_ifuse()
     mi = mount_info(mount)
     if not mi:
         raise SyncError(f"iPod mount is not mounted: {mount}")
@@ -324,12 +380,15 @@ def require_ifuse_mount(mount: Path, writable: bool | None = None):
 
 
 def remount_ifuse(mount: Path, *, writable: bool):
-    require_cmd("fusermount")
-    require_cmd("ifuse")
+    fusermount = require_cmd("fusermount")
+    ifuse = require_cmd("ifuse")
+    require_safe_ifuse(ifuse)
+
     if mount_info(mount):
-        run(["fusermount", "-u", str(mount)])
+        run([fusermount, "-u", str(mount)])
+
     mount.mkdir(parents=True, exist_ok=True)
-    cmd = ["ifuse", str(mount)]
+    cmd = [ifuse, str(mount)]
     if not writable:
         cmd += ["-o", "ro"]
     run(cmd)
@@ -353,6 +412,52 @@ def verify_device_connection() -> str:
         raise SyncError(f"expected exactly one connected iOS device; found {len(ids)}")
     run(["idevicepair", "validate"])
     return ids[0]
+
+
+def require_stable_file_read(
+    path: Path,
+    *,
+    attempts: int = 3,
+) -> str:
+    """Require repeated live-device reads to return identical bytes."""
+    if attempts < 2:
+        raise ValueError(
+            "stable-read verification requires at least two attempts"
+        )
+
+    observations: list[tuple[int, int, str]] = []
+
+    for _ in range(attempts):
+        before = path.stat()
+
+        digest = sha256_file(path)
+
+        after = path.stat()
+
+        if (
+            before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+        ):
+            raise SyncError(
+                "unstable iPod filesystem read detected for "
+                f"{path.name}: file metadata changed while reading"
+            )
+
+        observations.append(
+            (
+                after.st_size,
+                after.st_mtime_ns,
+                digest,
+            )
+        )
+
+    if len(set(observations)) != 1:
+        raise SyncError(
+            "unstable iPod filesystem read detected for "
+            f"{path.name}: repeated reads returned different bytes"
+        )
+
+    return observations[0][2]
 
 
 def sqlite_integrity(path: Path) -> str:
@@ -2940,7 +3045,28 @@ def doctor(source: Path, mount: Path) -> int:
             _doctor_row(name, "MISSING")
             ready = False
         else:
-            _doctor_row(name, "PASS", path)
+            if name == "ifuse":
+                try:
+                    version = require_safe_ifuse(path)
+                except SyncError as exc:
+                    _doctor_row(
+                        "ifuse",
+                        "UNSAFE",
+                        str(exc),
+                    )
+                    ready = False
+                else:
+                    rendered_version = ".".join(
+                        str(part)
+                        for part in version
+                    )
+                    _doctor_row(
+                        "ifuse",
+                        "PASS",
+                        f"{path}; version={rendered_version}",
+                    )
+            else:
+                _doctor_row(name, "PASS", path)
 
     print()
     print("Packaged components")
@@ -3151,6 +3277,8 @@ def main(argv=None) -> int:
 
     lp = live_paths(mount)
     for name in ("Library.itdb", "Dynamic.itdb", "Locations.itdb", "Extras.itdb"):
+        require_stable_file_read(lp[name])
+
         if sqlite_integrity(lp[name]) != "ok":
             raise SyncError(f"live {name} integrity failed")
 

@@ -203,7 +203,37 @@ CONFIG=/etc/ipod-sync/config.env
 APP=/usr/lib/ipod-sync/ipod_sync.py
 
 mount_info() { findmnt -n -M "$IPOD_SYNC_MOUNT" -o FSTYPE,OPTIONS 2>/dev/null || true; }
+
+require_safe_ifuse() {
+  command -v ifuse >/dev/null 2>&1 || {
+    echo "REFUSED: required command not found: ifuse" >&2
+    exit 2
+  }
+
+  local output version
+
+  if ! output="$(ifuse --version 2>&1)"; then
+    echo "REFUSED: unable to determine ifuse version" >&2
+    exit 2
+  fi
+
+  if [[ "$output" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    version="${BASH_REMATCH[1]}"
+  else
+    echo "REFUSED: unable to determine ifuse version" >&2
+    exit 2
+  fi
+
+  if [[ "$version" == "1.2.0" ]]; then
+    echo "REFUSED: unsafe ifuse version detected: 1.2.0" >&2
+    echo "ifuse 1.2.0 has an upstream-confirmed data-corruption bug." >&2
+    echo "Unmount any existing ifuse mount and install ifuse 1.2.1 or later." >&2
+    exit 2
+  fi
+}
+
 ensure_ro_mount() {
+  require_safe_ifuse
   mkdir -p "$IPOD_SYNC_MOUNT"
   if mountpoint -q "$IPOD_SYNC_MOUNT"; then
     local info fstype opts
