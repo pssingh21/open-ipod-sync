@@ -1035,3 +1035,21 @@ jobs:
           echo "============================================================"
           echo "AUTOMATED RELEASE: COMPLETE + VERIFIED"
           echo "============================================================"
+      - name: Run independent consumer release verifier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          python3 tools/verify-release.py \
+            published \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-repository \
+              "https://github.com/$GITHUB_REPOSITORY" \
+            --github \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG"
+
+          echo "independent consumer verification: PASS"

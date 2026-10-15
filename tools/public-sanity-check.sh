@@ -81,6 +81,11 @@ echo "===== SOURCE ARCHIVE REPRODUCIBILITY ====="
 "$ROOT/tests/test_source_archive.sh"
 
 echo
+echo "===== CONSUMER RELEASE CONTRACT ====="
+PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT/tests/test_consumer_release_contract.py"
+
+echo
 echo "===== OFFLINE RELEASE VERIFIER ====="
 PYTHONDONTWRITEBYTECODE=1 \
     python3 "$ROOT/tests/test_verify_release.py"
