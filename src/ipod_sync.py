@@ -329,8 +329,56 @@ def parse_ifuse_version(output: str) -> tuple[int, int, int]:
     )
 
 
+def _debian_ifuse_known_unsafe_version(
+    binary: str,
+) -> tuple[int, int, int] | None:
+    """Identify Debian/Ubuntu's known-unsafe ifuse 1.2.0 package.
+
+    This fallback is deliberately asymmetric: package metadata may identify
+    a known-unsafe release so that we can reject it, but package metadata is
+    never sufficient to authorize an otherwise unidentifiable binary.
+    """
+    binary_path = os.path.realpath(binary)
+
+    if binary_path != "/usr/bin/ifuse":
+        return None
+
+    try:
+        result = run(
+            [
+                "dpkg-query",
+                "-W",
+                "-f=${Version}",
+                "ifuse",
+            ],
+            check=False,
+        )
+    except (OSError, SyncError):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    try:
+        version = parse_ifuse_version(
+            result.stdout or ""
+        )
+    except SyncError:
+        return None
+
+    if version == (1, 2, 0):
+        return version
+
+    return None
+
+
 def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
-    """Return the installed ifuse semantic version without touching the device."""
+    """Return the active ifuse version without touching the device.
+
+    Prefer the binary's own version output. If Debian/Ubuntu's /usr/bin/ifuse
+    has malformed version output, package metadata is consulted only to
+    identify and reject the known-unsafe upstream 1.2.0 release.
+    """
     binary = binary or require_cmd("ifuse")
 
     try:
@@ -350,9 +398,22 @@ def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
             "ifuse --version failed"
         )
 
-    return parse_ifuse_version(
-        result.stdout or ""
-    )
+    try:
+        return parse_ifuse_version(
+            result.stdout or ""
+        )
+    except SyncError as exc:
+        unsafe = _debian_ifuse_known_unsafe_version(
+            binary
+        )
+
+        if unsafe is not None:
+            return unsafe
+
+        raise SyncError(
+            "unable to determine ifuse version from "
+            "ifuse --version output"
+        ) from exc
 
 
 def require_safe_ifuse(binary: str | None = None) -> tuple[int, int, int]:

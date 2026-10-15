@@ -168,6 +168,126 @@ assert "failed to execute" in message
 
 
 # ---------------------------------------------------------------------------
+# Ubuntu/Debian malformed self-version output may use dpkg metadata only to
+# identify the known-unsafe 1.2.0 package. Metadata must never authorize an
+# otherwise unidentifiable binary.
+# ---------------------------------------------------------------------------
+
+def resolute_unsafe_run(cmd, **kwargs):
+    if cmd == [
+        "/usr/bin/ifuse",
+        "--version",
+    ]:
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="ifuse $PACKAGE_VERSION)\\n",
+        )
+
+    if cmd == [
+        "dpkg-query",
+        "-W",
+        "-f=${Version}",
+        "ifuse",
+    ]:
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="1.2.0-2",
+        )
+
+    raise AssertionError(
+        f"unexpected command: {cmd!r}"
+    )
+
+
+with patched(
+    run=resolute_unsafe_run,
+):
+    message = expect_sync_error(
+        lambda: m.require_safe_ifuse(
+            "/usr/bin/ifuse"
+        ),
+        "unsafe ifuse version detected: 1.2.0",
+    )
+
+assert "data corruption" in message
+
+
+def safe_metadata_but_broken_binary_run(
+    cmd,
+    **kwargs,
+):
+    if cmd == [
+        "/usr/bin/ifuse",
+        "--version",
+    ]:
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="ifuse $PACKAGE_VERSION)\\n",
+        )
+
+    if cmd == [
+        "dpkg-query",
+        "-W",
+        "-f=${Version}",
+        "ifuse",
+    ]:
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="1.2.1-1",
+        )
+
+    raise AssertionError(
+        f"unexpected command: {cmd!r}"
+    )
+
+
+with patched(
+    run=safe_metadata_but_broken_binary_run,
+):
+    expect_sync_error(
+        lambda: m.require_safe_ifuse(
+            "/usr/bin/ifuse"
+        ),
+        "unable to determine ifuse version",
+    )
+
+
+def local_unidentifiable_binary_run(
+    cmd,
+    **kwargs,
+):
+    if cmd == [
+        "/usr/local/bin/ifuse",
+        "--version",
+    ]:
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="ifuse unknown-version\\n",
+        )
+
+    raise AssertionError(
+        "dpkg metadata must not be consulted "
+        "for /usr/local/bin/ifuse"
+    )
+
+
+with patched(
+    run=local_unidentifiable_binary_run,
+):
+    expect_sync_error(
+        lambda: m.require_safe_ifuse(
+            "/usr/local/bin/ifuse"
+        ),
+        "unable to determine ifuse version",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Version command failure is fail-closed.
 # ---------------------------------------------------------------------------
 

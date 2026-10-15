@@ -174,6 +174,20 @@ grep -Fq   'unsafe ifuse version detected: 1.2.0'   "$WRAPPER" || {
     exit 1
   }
 
+grep -Fq \
+  '_debian_ifuse_known_unsafe_version' \
+  "$APP" || {
+    echo "FAIL: Debian ifuse unsafe-version fallback missing" >&2
+    exit 1
+  }
+
+grep -Fq \
+  'dpkg-query' \
+  "$WRAPPER" || {
+    echo "FAIL: wrapper Debian ifuse fallback missing" >&2
+    exit 1
+  }
+
 echo "ifuse runtime safety contract: PASS"
 
 ACTUAL_APP_VERSION="$(python3 "$APP" --version)"
