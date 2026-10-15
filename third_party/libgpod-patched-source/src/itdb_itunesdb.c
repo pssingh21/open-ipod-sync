@@ -1112,11 +1112,11 @@ static gboolean playcounts_plist_read (FImport *fimp, GValue *plist_data)
 
     array = (GArray*)g_value_get_boxed (to_parse);
     for (i = 0; i < array->len; i++) {
-       if (!G_VALUE_HOLDS (g_array_index (array, GValue *, i), G_TYPE_HASH_TABLE)) {
+       if (!G_VALUE_HOLDS (&g_array_index (array, GValue, i), G_TYPE_HASH_TABLE)) {
           continue;
        }
 
-       track_dict = g_value_get_boxed (g_array_index (array, GValue *, i));
+       track_dict = g_value_get_boxed (&g_array_index (array, GValue, i));
        if (track_dict == NULL)
            continue;
 

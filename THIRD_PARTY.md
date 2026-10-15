@@ -3,6 +3,8 @@
 This project interoperates with and/or redistributes pieces from established free-software projects.
 
 - **libgpod 0.8.3**: the release package contains a library rebuilt from the captured modified source; the public source archive includes that corresponding source tree and a reviewable delta. Preserve its upstream/Debian copyright and license notices.
+  The bundled delta also corrects `playcounts_plist_read()` GArray element handling: PlayCounts entries are inline `GValue` objects and are addressed as such rather than interpreted as `GValue *` pointers, preventing a parser crash on non-empty `PlayCounts.plist` data.
+
 - **libimobiledevice / ifuse**: system dependencies; not vendored.
   `ifuse` 1.2.0 is explicitly unsupported because upstream identifies that
   release as having a serious data-corruption bug. `open-ipod-sync` rejects
