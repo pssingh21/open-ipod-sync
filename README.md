@@ -567,12 +567,49 @@ This repository-owned host bootstrap:
 After host preparation:
 
 ```bash
+# Validate the source tree before generating build artifacts.
+./tools/public-sanity-check.sh
+
 ./build-deb.sh
 sudo apt install ./dist/ipod-sync_*.deb
 
 ipod-sync doctor
 ipod-sync mount-ro
 ```
+
+The public sanity suite is a **pre-build source-tree check**. Run it before
+`./build-deb.sh`, while the checkout does not contain generated package-build
+state.
+
+The build creates temporary files under `build/`, including Autotools output
+for the bundled libgpod build. Generated files such as `Makefile`,
+`config.log`, `config.status`, and `libtool` can contain the local checkout
+path, for example `/home/<user>/open-ipod-sync`. A source-tree privacy scan
+will correctly reject those generated paths if the sanity suite is run after
+the build.
+
+If you want to rerun the public source sanity suite after building, first
+remove the generated build output:
+
+```bash
+rm -rf build dist
+./tools/public-sanity-check.sh
+```
+
+Do not weaken, bypass, or add privacy-scanner exclusions for this generated
+state. Clean `build/` and `dist/` instead.
+
+Generated package artifacts are placed under `dist/`. Runtime dependencies are
+declared by the generated Debian package.
+
+After installation, configuration is managed at:
+
+```text
+/etc/ipod-sync/config.env
+```
+
+There is no separate second installation procedure after this point. Continue
+with the normal setup described earlier in this README.
 
 The networked host-preparation phase is intentionally separate from
 `build-deb.sh`. `prepare-host.sh` may access Debian/Ubuntu package repositories
@@ -581,62 +618,6 @@ build remains the project's reproducible, network-isolated,
 material-recorded, tool-resolution-confined build and does not download
 `ifuse` or invoke `prepare-host.sh`.
 
-## Install build dependencies
-
-On Debian/Ubuntu:
-
-```bash
-sudo apt update
-
-sudo apt install \
-  build-essential \
-  dpkg-dev \
-  pkg-config \
-  intltool \
-  gettext \
-  libglib2.0-dev \
-  libsqlite3-dev \
-  libplist-dev \
-  libxml2-dev \
-  zlib1g-dev \
-  libimobiledevice-dev
-```
-
-Runtime dependencies are declared by the generated Debian package.
-
-## Run the public sanity checks
-
-Before building:
-
-```bash
-./tools/public-sanity-check.sh
-```
-
-## Build the Debian package
-
-```bash
-./build-deb.sh
-```
-
-The generated artifacts are placed under:
-
-```text
-dist/
-```
-
-Install the resulting package with:
-
-```bash
-sudo apt install ./dist/ipod-sync_*.deb
-```
-
-Then configure:
-
-```text
-/etc/ipod-sync/config.env
-```
-
-There is no separate second installation procedure after this point. Continue with the normal setup described earlier in this README.
 
 ---
 
