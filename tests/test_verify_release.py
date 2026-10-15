@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import copy
 import datetime as dt
 import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -593,6 +596,284 @@ def expect_failure(
     )
 
 
+
+def make_fake_gh(
+    path: Path,
+) -> None:
+    script = """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+
+args = sys.argv[1:]
+
+log_path = os.environ.get(
+    "FAKE_GH_LOG"
+)
+
+if log_path:
+    with open(
+        log_path,
+        "a",
+        encoding="utf-8",
+    ) as f:
+        f.write(
+            json.dumps(args)
+            + "\\n"
+        )
+
+fail_match = os.environ.get(
+    "FAKE_GH_FAIL_MATCH",
+    "",
+)
+
+if (
+    fail_match
+    and fail_match in " ".join(args)
+):
+    print(
+        "synthetic gh failure",
+        file=sys.stderr,
+    )
+    raise SystemExit(9)
+
+
+if args[:2] == [
+    "release",
+    "view",
+]:
+    root = Path(
+        os.environ[
+            "FAKE_GH_RELEASE_DIR"
+        ]
+    )
+
+    assets = [
+        {
+            "name": item.name,
+        }
+        for item in root.iterdir()
+        if item.is_file()
+    ]
+
+    extra = os.environ.get(
+        "FAKE_GH_REMOTE_EXTRA",
+        "",
+    )
+
+    if extra:
+        assets.append(
+            {
+                "name": extra,
+            }
+        )
+
+    print(
+        json.dumps(
+            {
+                "assets": assets,
+                "isDraft": False,
+                "isImmutable": (
+                    os.environ.get(
+                        "FAKE_GH_IMMUTABLE",
+                        "1",
+                    )
+                    == "1"
+                ),
+                "isPrerelease": True,
+                "tagName": os.environ[
+                    "FAKE_GH_TAG"
+                ],
+            }
+        )
+    )
+
+    raise SystemExit(0)
+
+
+if (
+    args
+    and args[0] == "api"
+):
+    endpoint = args[1]
+
+    if "/git/ref/tags/" in endpoint:
+        print(
+            json.dumps(
+                {
+                    "object": {
+                        "sha": "ab" * 20,
+                        "type": "tag",
+                    }
+                }
+            )
+        )
+
+        raise SystemExit(0)
+
+    if "/git/tags/" in endpoint:
+        print(
+            json.dumps(
+                {
+                    "object": {
+                        "sha": os.environ.get(
+                            "FAKE_GH_TAG_COMMIT",
+                            "12" * 20,
+                        ),
+                        "type": "commit",
+                    }
+                }
+            )
+        )
+
+        raise SystemExit(0)
+
+
+if args[:2] == [
+    "release",
+    "verify",
+]:
+    raise SystemExit(0)
+
+
+if args[:2] == [
+    "release",
+    "verify-asset",
+]:
+    raise SystemExit(0)
+
+
+if args[:2] == [
+    "attestation",
+    "verify",
+]:
+    raise SystemExit(0)
+
+
+print(
+    "unsupported fake gh invocation: "
+    + json.dumps(args),
+    file=sys.stderr,
+)
+
+raise SystemExit(97)
+"""
+
+    path.write_text(
+        script
+    )
+
+    path.chmod(
+        0o755
+    )
+
+
+def github_test_env(
+    root: Path,
+    fake_bin: Path,
+    log: Path,
+) -> dict[str, str | None]:
+    keys = (
+        "PATH",
+        "FAKE_GH_RELEASE_DIR",
+        "FAKE_GH_LOG",
+        "FAKE_GH_TAG",
+        "FAKE_GH_TAG_COMMIT",
+        "FAKE_GH_IMMUTABLE",
+        "FAKE_GH_REMOTE_EXTRA",
+        "FAKE_GH_FAIL_MATCH",
+    )
+
+    previous = {
+        key: os.environ.get(key)
+        for key in keys
+    }
+
+    os.environ["PATH"] = (
+        str(fake_bin)
+        + os.pathsep
+        + os.environ.get(
+            "PATH",
+            "",
+        )
+    )
+
+    os.environ[
+        "FAKE_GH_RELEASE_DIR"
+    ] = str(root)
+
+    os.environ[
+        "FAKE_GH_LOG"
+    ] = str(log)
+
+    os.environ[
+        "FAKE_GH_TAG"
+    ] = "v0.2.0-alpha.7"
+
+    for key in (
+        "FAKE_GH_TAG_COMMIT",
+        "FAKE_GH_IMMUTABLE",
+        "FAKE_GH_REMOTE_EXTRA",
+        "FAKE_GH_FAIL_MATCH",
+    ):
+        os.environ.pop(
+            key,
+            None,
+        )
+
+    return previous
+
+
+def restore_env(
+    previous: dict[str, str | None],
+) -> None:
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(
+                key,
+                None,
+            )
+
+        else:
+            os.environ[key] = value
+
+
+def expect_github_failure(
+    root: Path,
+    contains: str,
+) -> None:
+    try:
+        verify.verify_github_authenticity(
+            root,
+            commit=COMMIT,
+            provenance_repository=REPOSITORY,
+            repo=(
+                "pssingh21/"
+                "open-ipod-sync"
+            ),
+            tag="v0.2.0-alpha.7",
+        )
+
+    except verify.VerifyError as exc:
+        message = str(exc)
+
+        if contains not in message:
+            raise AssertionError(
+                "wrong GitHub verifier failure\\n"
+                f"expected substring: {contains!r}\\n"
+                f"actual: {message!r}"
+            )
+
+        return
+
+    raise AssertionError(
+        "GitHub verifier unexpectedly accepted "
+        "synthetic authenticity failure"
+    )
+
+
 with tempfile.TemporaryDirectory() as td:
     root = Path(td)
 
@@ -983,6 +1264,302 @@ with tempfile.TemporaryDirectory() as td:
     print("external commit pinning: PASS")
 
 
+
 print(
     "offline consumer verifier adversarial tests: PASS"
+)
+
+
+with tempfile.TemporaryDirectory() as td:
+    base = Path(td)
+    root = base / "release"
+    fake_bin = base / "bin"
+    log = base / "gh.log"
+
+    root.mkdir()
+    fake_bin.mkdir()
+
+    make_bundle(root)
+
+    make_fake_gh(
+        fake_bin / "gh"
+    )
+
+    previous = github_test_env(
+        root,
+        fake_bin,
+        log,
+    )
+
+    try:
+        verify.verify_github_authenticity(
+            root,
+            commit=COMMIT,
+            provenance_repository=REPOSITORY,
+            repo=(
+                "pssingh21/"
+                "open-ipod-sync"
+            ),
+            tag="v0.2.0-alpha.7",
+        )
+
+        calls = [
+            json.loads(line)
+            for line in log.read_text().splitlines()
+        ]
+
+        release_asset_calls = [
+            call
+            for call in calls
+            if call[:2]
+            == [
+                "release",
+                "verify-asset",
+            ]
+        ]
+
+        if len(
+            release_asset_calls
+        ) != 8:
+            raise AssertionError(
+                "expected eight release asset "
+                f"verifications, got "
+                f"{len(release_asset_calls)}"
+            )
+
+        attestation_calls = [
+            call
+            for call in calls
+            if call[:2]
+            == [
+                "attestation",
+                "verify",
+            ]
+        ]
+
+        if len(
+            attestation_calls
+        ) != 8:
+            raise AssertionError(
+                "expected seven SLSA attestations "
+                "plus one SPDX attestation"
+            )
+
+        signer = (
+            "pssingh21/open-ipod-sync/"
+            ".github/workflows/ci.yml"
+        )
+
+        for call in attestation_calls:
+            if (
+                "--signer-workflow"
+                not in call
+                or signer not in call
+                or "--source-digest"
+                not in call
+                or COMMIT not in call
+                or "--source-ref"
+                not in call
+                or "refs/heads/main"
+                not in call
+                or "--deny-self-hosted-runners"
+                not in call
+            ):
+                raise AssertionError(
+                    "attestation verification did not "
+                    "enforce signer/source/runner policy"
+                )
+
+        spdx_calls = [
+            call
+            for call in attestation_calls
+            if (
+                "--predicate-type"
+                in call
+                and (
+                    "https://spdx.dev/"
+                    "Document/v2.3"
+                )
+                in call
+            )
+        ]
+
+        if len(spdx_calls) != 1:
+            raise AssertionError(
+                "expected exactly one SPDX "
+                "predicate verification"
+            )
+
+    finally:
+        restore_env(
+            previous
+        )
+
+    print(
+        "GitHub authenticity happy path: PASS"
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    base = Path(td)
+    root = base / "release"
+    fake_bin = base / "bin"
+    log = base / "gh.log"
+
+    root.mkdir()
+    fake_bin.mkdir()
+
+    make_bundle(root)
+    make_fake_gh(
+        fake_bin / "gh"
+    )
+
+    previous = github_test_env(
+        root,
+        fake_bin,
+        log,
+    )
+
+    os.environ[
+        "FAKE_GH_IMMUTABLE"
+    ] = "0"
+
+    try:
+        expect_github_failure(
+            root,
+            "not immutable",
+        )
+
+    finally:
+        restore_env(
+            previous
+        )
+
+    print(
+        "mutable release rejection: PASS"
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    base = Path(td)
+    root = base / "release"
+    fake_bin = base / "bin"
+    log = base / "gh.log"
+
+    root.mkdir()
+    fake_bin.mkdir()
+
+    make_bundle(root)
+    make_fake_gh(
+        fake_bin / "gh"
+    )
+
+    previous = github_test_env(
+        root,
+        fake_bin,
+        log,
+    )
+
+    os.environ[
+        "FAKE_GH_TAG_COMMIT"
+    ] = "34" * 20
+
+    try:
+        expect_github_failure(
+            root,
+            "does not resolve to verified source commit",
+        )
+
+    finally:
+        restore_env(
+            previous
+        )
+
+    print(
+        "wrong tag target rejection: PASS"
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    base = Path(td)
+    root = base / "release"
+    fake_bin = base / "bin"
+    log = base / "gh.log"
+
+    root.mkdir()
+    fake_bin.mkdir()
+
+    make_bundle(root)
+    make_fake_gh(
+        fake_bin / "gh"
+    )
+
+    previous = github_test_env(
+        root,
+        fake_bin,
+        log,
+    )
+
+    os.environ[
+        "FAKE_GH_REMOTE_EXTRA"
+    ] = "unexpected.bin"
+
+    try:
+        expect_github_failure(
+            root,
+            "remote release asset set mismatch",
+        )
+
+    finally:
+        restore_env(
+            previous
+        )
+
+    print(
+        "remote asset-set rejection: PASS"
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    base = Path(td)
+    root = base / "release"
+    fake_bin = base / "bin"
+    log = base / "gh.log"
+
+    root.mkdir()
+    fake_bin.mkdir()
+
+    make_bundle(root)
+    make_fake_gh(
+        fake_bin / "gh"
+    )
+
+    previous = github_test_env(
+        root,
+        fake_bin,
+        log,
+    )
+
+    os.environ[
+        "FAKE_GH_FAIL_MATCH"
+    ] = "attestation verify"
+
+    try:
+        expect_github_failure(
+            root,
+            "GitHub command failed",
+        )
+
+    finally:
+        restore_env(
+            previous
+        )
+
+    print(
+        "attestation failure rejection: PASS"
+    )
+
+
+print(
+    "GitHub consumer authenticity tests: PASS"
 )

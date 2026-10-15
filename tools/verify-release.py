@@ -62,6 +62,16 @@ CHECKSUM_LINE_RE = re.compile(
     r"([A-Za-z0-9][A-Za-z0-9._+~:-]*)$"
 )
 
+REPOSITORY_SLUG_RE = re.compile(
+    r"^[A-Za-z0-9_.-]+/"
+    r"[A-Za-z0-9_.-]+$"
+)
+
+RELEASE_TAG_RE = re.compile(
+    r"^[A-Za-z0-9]"
+    r"[A-Za-z0-9._+-]{0,127}$"
+)
+
 
 class VerifyError(RuntimeError):
     pass
@@ -1760,6 +1770,392 @@ def verify_release(
     }
 
 
+
+def run_gh(
+    args: list[str],
+) -> str:
+    if shutil.which("gh") is None:
+        fail(
+            "GitHub authenticity verification requires "
+            "the GitHub CLI command: gh"
+        )
+
+    proc = subprocess.run(
+        [
+            "gh",
+            *args,
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    if proc.returncode != 0:
+        rendered = " ".join(
+            [
+                "gh",
+                *args,
+            ]
+        )
+
+        detail = proc.stderr.strip()
+
+        if detail:
+            fail(
+                "GitHub command failed: "
+                f"{rendered}: {detail}"
+            )
+
+        fail(
+            "GitHub command failed: "
+            f"{rendered}"
+        )
+
+    return proc.stdout
+
+
+def run_gh_json(
+    args: list[str],
+    label: str,
+) -> Any:
+    raw = run_gh(
+        args
+    )
+
+    try:
+        return json.loads(
+            raw
+        )
+
+    except json.JSONDecodeError as exc:
+        fail(
+            f"{label}: GitHub CLI returned invalid JSON: "
+            f"{exc}"
+        )
+
+
+def resolve_github_tag_commit(
+    *,
+    repo: str,
+    tag: str,
+) -> str:
+    ref = require_dict(
+        run_gh_json(
+            [
+                "api",
+                f"repos/{repo}/git/ref/tags/{tag}",
+            ],
+            "GitHub tag reference",
+        ),
+        "GitHub tag reference",
+    )
+
+    obj = require_dict(
+        ref.get("object"),
+        "GitHub tag reference object",
+    )
+
+    for _ in range(8):
+        kind = require_string(
+            obj.get("type"),
+            "GitHub tag object type",
+        )
+
+        sha = require_string(
+            obj.get("sha"),
+            "GitHub tag object SHA",
+        )
+
+        if not re.fullmatch(
+            r"[0-9a-f]{40}",
+            sha,
+        ):
+            fail(
+                "GitHub tag object has invalid SHA: "
+                f"{sha!r}"
+            )
+
+        if kind == "commit":
+            return sha
+
+        if kind != "tag":
+            fail(
+                "GitHub tag resolves to unsupported "
+                f"object type: {kind}"
+            )
+
+        tag_doc = require_dict(
+            run_gh_json(
+                [
+                    "api",
+                    f"repos/{repo}/git/tags/{sha}",
+                ],
+                "GitHub annotated tag",
+            ),
+            "GitHub annotated tag",
+        )
+
+        obj = require_dict(
+            tag_doc.get("object"),
+            "GitHub annotated tag object",
+        )
+
+    fail(
+        "GitHub tag indirection exceeds verification limit"
+    )
+
+
+def verify_github_authenticity(
+    root: Path,
+    *,
+    commit: str,
+    provenance_repository: str,
+    repo: str,
+    tag: str,
+) -> None:
+    if not REPOSITORY_SLUG_RE.fullmatch(
+        repo
+    ):
+        fail(
+            "invalid GitHub repository slug; "
+            "expected OWNER/REPO"
+        )
+
+    if not RELEASE_TAG_RE.fullmatch(
+        tag
+    ):
+        fail(
+            "unsupported GitHub release tag syntax"
+        )
+
+    expected_repository = (
+        f"https://github.com/{repo}"
+    )
+
+    if (
+        provenance_repository.rstrip("/")
+        != expected_repository
+    ):
+        fail(
+            "PROVENANCE repository does not match "
+            "requested GitHub repository; "
+            f"expected={expected_repository} "
+            f"actual={provenance_repository.rstrip('/')}"
+        )
+
+    release = require_dict(
+        run_gh_json(
+            [
+                "release",
+                "view",
+                tag,
+                "--repo",
+                repo,
+                "--json",
+                (
+                    "tagName,isDraft,isPrerelease,"
+                    "isImmutable,assets"
+                ),
+            ],
+            "GitHub release",
+        ),
+        "GitHub release",
+    )
+
+    if release.get(
+        "tagName"
+    ) != tag:
+        fail(
+            "GitHub release tag identity mismatch"
+        )
+
+    if release.get(
+        "isDraft"
+    ) is not False:
+        fail(
+            "GitHub release is still a draft"
+        )
+
+    if release.get(
+        "isImmutable"
+    ) is not True:
+        fail(
+            "GitHub release is not immutable"
+        )
+
+    remote_assets_raw = require_list(
+        release.get("assets"),
+        "GitHub release assets",
+    )
+
+    remote_names: list[str] = []
+
+    for index, item in enumerate(
+        remote_assets_raw
+    ):
+        asset = require_dict(
+            item,
+            f"GitHub release assets[{index}]",
+        )
+
+        remote_names.append(
+            require_string(
+                asset.get("name"),
+                (
+                    "GitHub release "
+                    f"assets[{index}].name"
+                ),
+            )
+        )
+
+    if len(set(remote_names)) != len(
+        remote_names
+    ):
+        fail(
+            "GitHub release contains duplicate asset names"
+        )
+
+    local_names = sorted(
+        entry.name
+        for entry in root.iterdir()
+        if entry.is_file()
+        and not entry.is_symlink()
+    )
+
+    if set(remote_names) != set(
+        local_names
+    ):
+        fail(
+            "remote release asset set mismatch; "
+            f"expected={local_names} "
+            f"actual={sorted(remote_names)}"
+        )
+
+    tag_commit = resolve_github_tag_commit(
+        repo=repo,
+        tag=tag,
+    )
+
+    if tag_commit != commit:
+        fail(
+            "GitHub release tag does not resolve to "
+            "verified source commit; "
+            f"expected={commit} "
+            f"actual={tag_commit}"
+        )
+
+    run_gh(
+        [
+            "release",
+            "verify",
+            tag,
+            "--repo",
+            repo,
+        ]
+    )
+
+    for name in local_names:
+        run_gh(
+            [
+                "release",
+                "verify-asset",
+                tag,
+                str(root / name),
+                "--repo",
+                repo,
+            ]
+        )
+
+    signer_workflow = (
+        f"{repo}/.github/workflows/ci.yml"
+    )
+
+    source_ref = (
+        "refs/heads/main"
+    )
+
+    ci_attested = [
+        root
+        / name
+        for name in (
+            next(
+                entry.name
+                for entry in root.iterdir()
+                if entry.is_file()
+                and DEB_RE.fullmatch(
+                    entry.name
+                )
+            ),
+            next(
+                entry.name
+                for entry in root.iterdir()
+                if entry.is_file()
+                and SPDX_RE.fullmatch(
+                    entry.name
+                )
+            ),
+            "PROVENANCE.json",
+            "CI-SHA256SUMS",
+            next(
+                entry.name
+                for entry in root.iterdir()
+                if entry.is_file()
+                and SOURCE_RE.fullmatch(
+                    entry.name
+                )
+            ),
+            "BUILD-MATERIALS.json",
+            "TOOLCHAIN.json",
+        )
+    ]
+
+    for artifact in ci_attested:
+        run_gh(
+            [
+                "attestation",
+                "verify",
+                str(artifact),
+                "--repo",
+                repo,
+                "--signer-workflow",
+                signer_workflow,
+                "--source-digest",
+                commit,
+                "--source-ref",
+                source_ref,
+                "--deny-self-hosted-runners",
+            ]
+        )
+
+    deb = next(
+        artifact
+        for artifact in ci_attested
+        if DEB_RE.fullmatch(
+            artifact.name
+        )
+    )
+
+    run_gh(
+        [
+            "attestation",
+            "verify",
+            str(deb),
+            "--repo",
+            repo,
+            "--predicate-type",
+            "https://spdx.dev/Document/v2.3",
+            "--signer-workflow",
+            signer_workflow,
+            "--source-digest",
+            commit,
+            "--source-ref",
+            source_ref,
+            "--deny-self-hosted-runners",
+        ]
+    )
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description=(
@@ -1789,7 +2185,59 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    return ap.parse_args()
+    ap.add_argument(
+        "--github",
+        action="store_true",
+        help=(
+            "After offline verification, verify the "
+            "immutable GitHub Release, tag binding, "
+            "release assets, and CI artifact attestations."
+        ),
+    )
+
+    ap.add_argument(
+        "--repo",
+        help=(
+            "GitHub repository slug OWNER/REPO. "
+            "Required with --github."
+        ),
+    )
+
+    ap.add_argument(
+        "--tag",
+        help=(
+            "GitHub release tag. Required with --github."
+        ),
+    )
+
+    args = ap.parse_args()
+
+    if args.github:
+        if not args.repo or not args.tag:
+            ap.error(
+                "--github requires both --repo and --tag"
+            )
+
+        if not REPOSITORY_SLUG_RE.fullmatch(
+            args.repo
+        ):
+            ap.error(
+                "--repo must use OWNER/REPO syntax"
+            )
+
+        if not RELEASE_TAG_RE.fullmatch(
+            args.tag
+        ):
+            ap.error(
+                "--tag contains unsupported characters"
+            )
+
+    elif args.repo or args.tag:
+        ap.error(
+            "--repo and --tag are only valid with --github"
+        )
+
+    return args
 
 
 def main() -> int:
@@ -1810,6 +2258,32 @@ def main() -> int:
 
         return 2
 
+    expected_repository = (
+        args.expected_repository
+    )
+
+    if args.github:
+        github_repository = (
+            f"https://github.com/{args.repo}"
+        )
+
+        if (
+            expected_repository is not None
+            and expected_repository.rstrip("/")
+            != github_repository
+        ):
+            print(
+                "ERROR: --expected-repository conflicts "
+                "with --repo",
+                file=sys.stderr,
+            )
+
+            return 2
+
+        expected_repository = (
+            github_repository
+        )
+
     try:
         result = verify_release(
             args.release_dir,
@@ -1817,9 +2291,20 @@ def main() -> int:
                 args.expected_commit
             ),
             expected_repository=(
-                args.expected_repository
+                expected_repository
             ),
         )
+
+        if args.github:
+            verify_github_authenticity(
+                args.release_dir.resolve(),
+                commit=result["commit"],
+                provenance_repository=(
+                    result["repository"]
+                ),
+                repo=args.repo,
+                tag=args.tag,
+            )
 
     except VerifyError as exc:
         print(
@@ -1865,6 +2350,26 @@ def main() -> int:
     print(
         "offline consumer release verification: PASS"
     )
+
+    if args.github:
+        print(
+            "GitHub immutable release: PASS"
+        )
+        print(
+            "GitHub tag/source binding: PASS"
+        )
+        print(
+            "GitHub release asset attestations: PASS"
+        )
+        print(
+            "GitHub CI provenance attestations: PASS"
+        )
+        print(
+            "GitHub SPDX attestation: PASS"
+        )
+        print(
+            "GitHub authenticity verification: PASS"
+        )
 
     return 0
 
