@@ -658,65 +658,6 @@ def audit_release_policy(
     print("release-tag bypass actors: NONE")
 
 
-def audit_historical_releases(repo: str) -> None:
-    releases = run_json(
-        [
-            "gh",
-            "release",
-            "list",
-            "--repo",
-            repo,
-            "--limit",
-            "100",
-            "--json",
-            "tagName,isDraft,isImmutable",
-        ]
-    )
-
-    require(
-        isinstance(releases, list),
-        "release list returned unexpected data",
-    )
-
-    require(
-        releases,
-        "no releases found",
-    )
-
-    immutable = []
-    legacy = []
-
-    for item in releases:
-        tag = item.get("tagName")
-
-        require(
-            isinstance(tag, str)
-            and tag.startswith("v"),
-            f"unexpected release tag: {tag!r}",
-        )
-
-        require(
-            item.get("isDraft") is False,
-            f"unexpected draft release: {tag}",
-        )
-
-        if item.get("isImmutable"):
-            immutable.append(tag)
-        else:
-            legacy.append(tag)
-
-    # Release/tag names originate from remote GitHub data. The policy audit
-    # only needs aggregate classification, so do not echo remote values.
-    print(
-        "immutable historical release count:",
-        len(immutable),
-    )
-
-    print(
-        "legacy pre-enforcement release count:",
-        len(legacy),
-    )
-
 
 def audit_local_contract(root: Path) -> None:
     workflow = (
@@ -821,10 +762,6 @@ def main() -> int:
     audit_release_policy(
         repo,
         rulesets,
-    )
-
-    audit_historical_releases(
-        repo,
     )
 
     audit_local_contract(

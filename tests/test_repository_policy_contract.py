@@ -173,19 +173,14 @@ for forbidden in (
     assert forbidden not in AUDITOR, forbidden
 
 
-# GitHub-derived release/tag names must not be printed. CodeQL treats
-# remote API values as potentially sensitive, and the audit only needs counts.
+# Historical release enumeration is not an ongoing enforcement control.
+# Keep that remote-data path out of the live auditor entirely.
 for forbidden in (
-    "sorted(immutable)",
-    "sorted(legacy)",
-):
-    assert forbidden not in AUDITOR, forbidden
-
-for required in (
+    "audit_historical_releases",
     "immutable historical release count:",
     "legacy pre-enforcement release count:",
 ):
-    assert required in AUDITOR, required
+    assert forbidden not in AUDITOR, forbidden
 
 
 # The live policy audit must not depend on user synchronization data.
