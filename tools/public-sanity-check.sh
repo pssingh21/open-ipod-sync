@@ -33,6 +33,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_apply_transaction_orchestrat
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_recovery_state_machine.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_cli_safety_routing.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_supply_chain_metadata.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_repository_policy_contract.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_privacy_scan.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_privacy_boundary_workflows.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_source_path_security.py"

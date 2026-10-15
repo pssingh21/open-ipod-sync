@@ -716,3 +716,41 @@ confined, with the documented filesystem-read boundary.
 The NAS/source-library read-only invariant is unchanged and is not involved in
 release verification.
 <!-- CONSUMER_RELEASE_RUNBOOK_END -->
+
+<!-- REPOSITORY_RELEASE_POLICY_BEGIN -->
+## GitHub repository controls around publication
+
+Release publication depends on GitHub controls outside the workflow file itself.
+
+The expected repository policy is documented in
+[`REPOSITORY-POLICY.md`](REPOSITORY-POLICY.md).
+
+Before a security-sensitive release, a maintainer can verify those controls
+read-only with:
+
+```bash
+python3 tools/audit-repository-policy.py
+```
+
+The publication boundary expects:
+
+- the `release` environment to require reviewer approval;
+- the `release` environment to accept deployments from `main` only;
+- repository-level immutable releases to be enabled;
+- `refs/tags/v*` creation to remain allowed so the workflow can create the new
+  annotated release tag;
+- existing `refs/tags/v*` references to reject update/retarget operations;
+- existing `refs/tags/v*` references to reject deletion; and
+- the release-tag ruleset to have no bypass actors.
+
+Repository-level immutable releases apply to releases created after the
+repository setting was enabled. Older releases may therefore legitimately
+report `isImmutable=false`. Their historical release metadata is not rewritten.
+
+The `Protect release tags` ruleset still protects those historical `v*` tag
+references from future retargeting or deletion.
+
+After a release is published, the workflow independently verifies the release
+immutability flag, exact release asset contract, checksums, attestations, and
+consumer-verification evidence.
+<!-- REPOSITORY_RELEASE_POLICY_END -->

@@ -9,11 +9,13 @@ changes.
 Do not post credentials, pairing records, device identifiers, private media,
 private filesystem paths, or other sensitive information in a public issue.
 
-If GitHub private vulnerability reporting is available for this repository,
-please use it for security-sensitive reports.
+GitHub private vulnerability reporting is enabled for this repository. Use it
+for security-sensitive reports so vulnerability details are not disclosed in a
+public issue.
 
-Otherwise, open a minimal public issue stating that you have a security report
-without including sensitive details.
+Do not place credentials, pairing records, device identifiers, private media,
+private filesystem paths, exploit details, or other sensitive report content in
+a public issue.
 
 ## Safety-sensitive areas
 
