@@ -416,37 +416,21 @@ def audit_security(
         "private vulnerability reporting is disabled",
     )
 
-    non_provider = (
-        security.get(
-            "secret_scanning_non_provider_patterns",
-            {},
-        ).get(
-            "status",
-            "unreported",
-        )
-    )
-
-    validity = (
-        security.get(
-            "secret_scanning_validity_checks",
-            {},
-        ).get(
-            "status",
-            "unreported",
-        )
-    )
-
     print("secret scanning: PASS")
     print("push protection: PASS")
     print("Dependabot security updates: PASS")
     print("private vulnerability reporting: PASS")
+
+    # These advanced Secret Protection capabilities are not part of the
+    # enforced repository-policy contract. Do not echo GitHub-returned
+    # capability values into audit output.
     print(
         "generic/non-provider secret patterns: "
-        f"{non_provider} (capability state)"
+        "NOT POLICY-REQUIRED"
     )
     print(
         "secret validity checks: "
-        f"{validity} (capability state)"
+        "NOT POLICY-REQUIRED"
     )
 
     for name, endpoint in (

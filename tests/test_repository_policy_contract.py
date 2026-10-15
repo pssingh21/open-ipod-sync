@@ -183,6 +183,24 @@ for forbidden in (
     assert forbidden not in AUDITOR, forbidden
 
 
+# Advanced Secret Protection capability state is not an enforcement
+# requirement. Do not echo GitHub-returned capability values into logs.
+for forbidden in (
+    'f"{non_provider} (capability state)"',
+    'f"{validity} (capability state)"',
+    "non_provider = (",
+    "validity = (",
+):
+    assert forbidden not in AUDITOR, forbidden
+
+for required in (
+    "generic/non-provider secret patterns: ",
+    "secret validity checks: ",
+    "NOT POLICY-REQUIRED",
+):
+    assert required in AUDITOR, required
+
+
 # The live policy audit must not depend on user synchronization data.
 for forbidden in (
     "/mnt/music",
