@@ -1403,6 +1403,197 @@ Keeping this boundary explicit prevents CI documentation from claiming a
 stronger filesystem-isolation property than the project actually verifies.
 <!-- CI_SECURITY_HARDENING_SUMMARY_END -->
 
+<!-- CONSUMER_RELEASE_VERIFICATION_BEGIN -->
+## Independently verify a release
+
+Every new release publishes enough evidence for a consumer to verify the
+downloaded package without access to the original GitHub Actions workspace,
+an iPod, or the user's music library.
+
+A release contains exactly these eight assets:
+
+```text
+CI-SHA256SUMS
+PROVENANCE.json
+SHA256SUMS
+BUILD-MATERIALS.json
+TOOLCHAIN.json
+open-ipod-sync-<40-character-commit>-source.tar
+ipod-sync_<public-version>_amd64.deb
+ipod-sync_<public-version>_amd64.spdx.json
+```
+
+`SHA256SUMS` covers the other seven public release assets.
+`CI-SHA256SUMS` preserves the identities of the six payloads produced by the
+audited Debian 11 CI build before the Debian package and SPDX filenames are
+normalized for GitHub Release publication.
+
+The deterministic source archive is generated from the exact release commit.
+`BUILD-MATERIALS.json` records the source archive digest, source commit,
+`SOURCE_DATE_EPOCH`, declared Debian snapshot/base-image identities, and
+observed build packages/tools. `TOOLCHAIN.json` records the Debian-owned
+commands admitted to the reproducibility build and the tool-resolution policy.
+
+### Requirements for local verification
+
+For the offline verification mode you need:
+
+```text
+python3
+dpkg-deb
+```
+
+On Debian or Ubuntu, `dpkg-deb` is provided by the `dpkg` package.
+
+For GitHub authenticity verification you additionally need the GitHub CLI:
+
+```text
+gh
+```
+
+If required by your GitHub CLI configuration, authenticate first:
+
+```bash
+gh auth login
+```
+
+### 1. Download the release assets
+
+From a checkout of this repository, choose the release tag and download all
+assets into an otherwise empty directory:
+
+```bash
+REPO="pssingh21/open-ipod-sync"
+TAG="v0.2.0-alpha.7"
+RELEASE_DIR="$PWD/release-verify-$TAG"
+
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR"
+
+gh release download "$TAG" \
+  --repo "$REPO" \
+  --dir "$RELEASE_DIR"
+```
+
+For a future release, replace `TAG` with that release's tag.
+
+### 2. Verify the downloaded bytes offline
+
+The core verifier does not contact GitHub or any other network service:
+
+```bash
+python3 tools/verify-release.py \
+  "$RELEASE_DIR" \
+  --expected-repository \
+  "https://github.com/$REPO"
+```
+
+To pin verification to an already-known commit, also provide:
+
+```bash
+python3 tools/verify-release.py \
+  "$RELEASE_DIR" \
+  --expected-commit "<40-character-commit>" \
+  --expected-repository \
+  "https://github.com/$REPO"
+```
+
+The offline verifier fails closed unless all of the following agree:
+
+- the directory contains exactly the eight expected release assets;
+- `SHA256SUMS` contains exactly the seven expected payload entries and every
+  digest matches;
+- `CI-SHA256SUMS` contains exactly the six audited CI payload identities;
+- the source archive filename, embedded Git commit, canonical root prefix, and
+  timestamps agree with `BUILD-MATERIALS.json`;
+- the source archive SHA-256 matches the digest recorded in
+  `BUILD-MATERIALS.json`;
+- the build-material schema and declared/observed environment records are
+  structurally valid;
+- the declared toolchain has no ambient `PATH` dependency, does not permit
+  developer-local roots, and its command targets remain inside the declared
+  executable roots;
+- `PROVENANCE.json` identifies the exact package digest, source commit,
+  `SOURCE_DATE_EPOCH`, Debian snapshot, package metadata, and SPDX digest;
+- the package files recorded in provenance hash to the exact bytes extracted
+  from the released `.deb`;
+- the SPDX document describes the released package and binds the package
+  SHA-256 and source commit.
+
+This verification is independent of the original CI workspace. It does not
+expand the documented build-isolation scope; the separately documented PR 4
+filesystem-read boundary still applies.
+
+### 3. Verify GitHub release authenticity
+
+After the offline checks pass, the optional online mode verifies the GitHub
+publication and attestations as well:
+
+```bash
+python3 tools/verify-release.py \
+  "$RELEASE_DIR" \
+  --expected-repository \
+  "https://github.com/$REPO" \
+  --github \
+  --repo "$REPO" \
+  --tag "$TAG"
+```
+
+The GitHub authenticity layer additionally requires:
+
+- the GitHub Release to be immutable and non-draft;
+- the remote release asset set to exactly match the eight locally verified
+  files;
+- the release tag to resolve to the same source commit encoded by the source
+  archive and build materials;
+- GitHub release verification to succeed for the release and every asset;
+- the CI-originating package, SPDX document, provenance, CI checksum manifest,
+  source archive, build-material manifest, and toolchain manifest to have valid
+  GitHub artifact attestations;
+- attestations to identify this repository's `.github/workflows/ci.yml`,
+  the verified source commit, `refs/heads/main`, and a non-self-hosted runner;
+- the Debian package to have the expected SPDX attestation.
+
+GitHub verification is deliberately opt-in. Running `verify-release.py` without
+`--github` remains an offline operation.
+
+### What independent verification proves
+
+A successful verification establishes a chain from the downloaded Debian
+package back to the exact published source commit and the build evidence
+recorded by CI:
+
+```text
+GitHub release/tag
+        |
+        v
+exact eight-asset release set
+        |
+        +--> SHA256SUMS
+        |
+        +--> deterministic source archive
+        |        |
+        |        +--> exact Git commit
+        |        +--> BUILD-MATERIALS.json
+        |
+        +--> TOOLCHAIN.json
+        |
+        +--> PROVENANCE.json
+        |        |
+        |        +--> Debian package SHA-256
+        |        +--> source commit / SOURCE_DATE_EPOCH
+        |        +--> SPDX SHA-256
+        |
+        +--> SPDX document
+        |
+        `--> Debian package
+```
+
+The verification path never reads or modifies the music source directory and
+never requires an iPod. The source-library read-only invariant remains
+unchanged.
+<!-- CONSUMER_RELEASE_VERIFICATION_END -->
+
 <!-- PR4_BUILD_ISOLATION_SCOPE_BEGIN -->
 ### Build isolation scope
 

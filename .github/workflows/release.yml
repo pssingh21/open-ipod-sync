@@ -352,6 +352,15 @@ jobs:
             sort
           )
 
+          mapfile -t SOURCES < <(
+            find ci-bundle \
+              -maxdepth 1 \
+              -type f \
+              -name 'open-ipod-sync-*-source.tar' \
+              -print |
+            sort
+          )
+
           [[ "${#DEBS[@]}" -eq 1 ]] || {
             echo "ERROR: expected exactly one Debian artifact" >&2
             exit 1
@@ -362,13 +371,27 @@ jobs:
             exit 1
           }
 
+          [[ "${#SOURCES[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one deterministic source archive" >&2
+            exit 1
+          }
+
           DEB="${DEBS[0]}"
           SPDX="${SPDXS[0]}"
+          SOURCE="${SOURCES[0]}"
+
+          [[ "$(basename "$SOURCE")" ==               "open-ipod-sync-${GITHUB_SHA}-source.tar" ]] || {
+            echo "ERROR: source archive filename does not match release commit" >&2
+            exit 1
+          }
 
           for f in \
               "$DEB" \
               "$SPDX" \
+              "$SOURCE" \
               ci-bundle/PROVENANCE.json \
+              ci-bundle/BUILD-MATERIALS.json \
+              ci-bundle/TOOLCHAIN.json \
               ci-bundle/SHA256SUMS
           do
             [[ -f "$f" ]] || {
@@ -376,6 +399,38 @@ jobs:
               exit 1
             }
           done
+
+          mapfile -t CI_BUNDLE_NAMES < <(
+            find ci-bundle \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' |
+            sort
+          )
+
+          expected_ci_bundle=(
+            "$(basename "$DEB")"
+            "$(basename "$SPDX")"
+            "$(basename "$SOURCE")"
+            PROVENANCE.json
+            BUILD-MATERIALS.json
+            TOOLCHAIN.json
+            SHA256SUMS
+          )
+
+          mapfile -t expected_ci_bundle_sorted < <(
+            printf '%s\n' "${expected_ci_bundle[@]}" |
+            sort
+          )
+
+          diff -u \
+            <(printf '%s\n' "${expected_ci_bundle_sorted[@]}") \
+            <(printf '%s\n' "${CI_BUNDLE_NAMES[@]}")
+
+          [[ "${#CI_BUNDLE_NAMES[@]}" -eq 7 ]] || {
+            echo "ERROR: expected exactly seven CI artifact files" >&2
+            exit 1
+          }
 
           [[ "$(dpkg-deb -f "$DEB" Version)" == \
               "$EXPECTED_DEB_VERSION" ]] || {
@@ -386,6 +441,21 @@ jobs:
           grep -F "$GITHUB_SHA" \
             ci-bundle/PROVENANCE.json >/dev/null || {
             echo "ERROR: release SHA missing from provenance" >&2
+            exit 1
+          }
+
+          grep -F "$GITHUB_SHA" \
+            ci-bundle/BUILD-MATERIALS.json >/dev/null || {
+            echo "ERROR: release SHA missing from build materials" >&2
+            exit 1
+          }
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$SOURCE"
+          )"
+
+          [[ "$embedded_commit" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: source archive embedded commit mismatch" >&2
             exit 1
           }
 
@@ -415,7 +485,22 @@ jobs:
             --deny-self-hosted-runners \
             >/dev/null
 
-          echo "CI checksums + attestations: PASS"
+          gh attestation verify "$SOURCE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify ci-bundle/BUILD-MATERIALS.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify ci-bundle/TOOLCHAIN.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo "CI checksums + attestations + verification evidence: PASS"
 
       - name: Prepare immutable release bundle
         shell: bash
@@ -430,9 +515,11 @@ jobs:
 
           CI_DEB="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.deb"
           CI_SPDX="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.spdx.json"
+          CI_SOURCE="ci-bundle/open-ipod-sync-${GITHUB_SHA}-source.tar"
 
           RELEASE_DEB="ipod-sync_${PUBLIC_VERSION}_amd64.deb"
           RELEASE_SPDX="ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
+          RELEASE_SOURCE="open-ipod-sync-${GITHUB_SHA}-source.tar"
 
           [[ -f "$CI_DEB" ]] || {
             echo "ERROR: exact CI Debian artifact missing: $CI_DEB" >&2
@@ -441,6 +528,21 @@ jobs:
 
           [[ -f "$CI_SPDX" ]] || {
             echo "ERROR: exact CI SPDX artifact missing: $CI_SPDX" >&2
+            exit 1
+          }
+
+          [[ -f "$CI_SOURCE" ]] || {
+            echo "ERROR: exact CI source archive missing: $CI_SOURCE" >&2
+            exit 1
+          }
+
+          [[ -f ci-bundle/BUILD-MATERIALS.json ]] || {
+            echo "ERROR: BUILD-MATERIALS.json missing from CI bundle" >&2
+            exit 1
+          }
+
+          [[ -f ci-bundle/TOOLCHAIN.json ]] || {
+            echo "ERROR: TOOLCHAIN.json missing from CI bundle" >&2
             exit 1
           }
 
@@ -456,6 +558,15 @@ jobs:
           cp ci-bundle/SHA256SUMS \
              release/CI-SHA256SUMS
 
+          cp "$CI_SOURCE" \
+             "release/$RELEASE_SOURCE"
+
+          cp ci-bundle/BUILD-MATERIALS.json \
+             release/BUILD-MATERIALS.json
+
+          cp ci-bundle/TOOLCHAIN.json \
+             release/TOOLCHAIN.json
+
           cmp -s "$CI_DEB" \
             "release/$RELEASE_DEB"
 
@@ -468,6 +579,15 @@ jobs:
           cmp -s ci-bundle/SHA256SUMS \
             release/CI-SHA256SUMS
 
+          cmp -s "$CI_SOURCE" \
+            "release/$RELEASE_SOURCE"
+
+          cmp -s ci-bundle/BUILD-MATERIALS.json \
+            release/BUILD-MATERIALS.json
+
+          cmp -s ci-bundle/TOOLCHAIN.json \
+            release/TOOLCHAIN.json
+
           (
             cd release
 
@@ -476,6 +596,9 @@ jobs:
               "$RELEASE_SPDX" \
               PROVENANCE.json \
               CI-SHA256SUMS \
+              "$RELEASE_SOURCE" \
+              BUILD-MATERIALS.json \
+              TOOLCHAIN.json \
               > SHA256SUMS
 
             sha256sum -c SHA256SUMS
@@ -676,6 +799,9 @@ jobs:
             "$SPDX" \
             release/PROVENANCE.json \
             release/CI-SHA256SUMS \
+            "release/open-ipod-sync-${GITHUB_SHA}-source.tar" \
+            release/BUILD-MATERIALS.json \
+            release/TOOLCHAIN.json \
             release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
@@ -705,13 +831,15 @@ jobs:
           python3 - \
             "$TAG" \
             "$PUBLIC_VERSION" \
+            "$GITHUB_SHA" \
             "$RELEASE_JSON" <<'PY'
           import json
           import sys
 
           tag = sys.argv[1]
           public_version = sys.argv[2]
-          doc = json.loads(sys.argv[3])
+          commit = sys.argv[3]
+          doc = json.loads(sys.argv[4])
 
           if doc["tagName"] != tag:
               raise SystemExit("ERROR: release tag mismatch")
@@ -729,6 +857,9 @@ jobs:
               "CI-SHA256SUMS",
               "PROVENANCE.json",
               "SHA256SUMS",
+              "BUILD-MATERIALS.json",
+              "TOOLCHAIN.json",
+              f"open-ipod-sync-{commit}-source.tar",
               f"ipod-sync_{public_version}_amd64.deb",
               f"ipod-sync_{public_version}_amd64.spdx.json",
           }
@@ -810,6 +941,34 @@ jobs:
 
           DEB="published/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
           SPDX="published/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
+          SOURCE="published/open-ipod-sync-${GITHUB_SHA}-source.tar"
+          MATERIALS="published/BUILD-MATERIALS.json"
+          TOOLCHAIN="published/TOOLCHAIN.json"
+
+          for required in \
+              "$SOURCE" \
+              "$MATERIALS" \
+              "$TOOLCHAIN"
+          do
+            [[ -f "$required" ]] || {
+              echo "ERROR: published verification asset missing: $required" >&2
+              exit 1
+            }
+          done
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$SOURCE"
+          )"
+
+          [[ "$embedded_commit" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: published source archive commit mismatch" >&2
+            exit 1
+          }
+
+          grep -F "$GITHUB_SHA" "$MATERIALS" >/dev/null || {
+            echo "ERROR: published build materials omit release commit" >&2
+            exit 1
+          }
 
           gh release verify "$TAG" \
             --repo "$GITHUB_REPOSITORY"
@@ -817,6 +976,9 @@ jobs:
           for asset in \
               "$DEB" \
               "$SPDX" \
+              "$SOURCE" \
+              "$MATERIALS" \
+              "$TOOLCHAIN" \
               published/PROVENANCE.json \
               published/CI-SHA256SUMS \
               published/SHA256SUMS
@@ -854,7 +1016,40 @@ jobs:
             --deny-self-hosted-runners \
             >/dev/null
 
+          gh attestation verify "$SOURCE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$MATERIALS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          gh attestation verify "$TOOLCHAIN" \
+            --repo "$GITHUB_REPOSITORY" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
           echo
           echo "============================================================"
           echo "AUTOMATED RELEASE: COMPLETE + VERIFIED"
           echo "============================================================"
+      - name: Run independent consumer release verifier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          python3 tools/verify-release.py \
+            published \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-repository \
+              "https://github.com/$GITHUB_REPOSITORY" \
+            --github \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG"
+
+          echo "independent consumer verification: PASS"

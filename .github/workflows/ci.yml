@@ -216,6 +216,7 @@ jobs:
             exit 1
           fi
 
+          rm -rf ci-artifact ci-toolchain-view
           mkdir -p ci-artifact
 
           package_name="$(basename "${packages[0]}")"
@@ -232,27 +233,69 @@ jobs:
             --build-environment \
               "debian-11-amd64-snapshot-20260830T235959Z"
 
+          source_name="open-ipod-sync-${git_commit}-source.tar"
+
+          ./tools/make-source-archive.sh \
+            "ci-artifact/$source_name" \
+            "$git_commit"
+
+          python3 tools/create-toolchain-view.py \
+            --output-dir ci-toolchain-view \
+            --manifest ci-artifact/TOOLCHAIN.json
+
+          python3 tools/generate-build-materials.py \
+            --source-archive "ci-artifact/$source_name" \
+            --source-commit "$git_commit" \
+            --source-date-epoch "$source_date_epoch" \
+            --snapshot-identity \
+              "debian-11-amd64-snapshot-20260830T235959Z" \
+            --base-image-identity \
+              "debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9" \
+            --output ci-artifact/BUILD-MATERIALS.json
+
+          rm -rf ci-toolchain-view
+
           (
             cd ci-artifact
 
-            mapfile -t checksum_files < <(
+            spdx_name="${package_name%.deb}.spdx.json"
+
+            expected_files=(
+              "$package_name"
+              "$spdx_name"
+              PROVENANCE.json
+              "$source_name"
+              BUILD-MATERIALS.json
+              TOOLCHAIN.json
+            )
+
+            mapfile -t actual_files < <(
               find . \
                 -maxdepth 1 \
                 -type f \
-                \( \
-                  -name '*.deb' -o \
-                  -name '*.spdx.json' -o \
-                  -name 'PROVENANCE.json' \
-                \) \
+                ! -name SHA256SUMS \
                 -printf '%f\n' |
               sort
             )
 
-            if [[ "${#checksum_files[@]}" -ne 3 ]]; then
-              echo "ERROR: expected Debian package, SPDX SBOM, and provenance" >&2
-              printf '%s\n' "${checksum_files[@]}" >&2
+            mapfile -t expected_sorted < <(
+              printf '%s\n' "${expected_files[@]}" |
+              sort
+            )
+
+            diff -u \
+              <(printf '%s\n' "${expected_sorted[@]}") \
+              <(printf '%s\n' "${actual_files[@]}")
+
+            mapfile -t checksum_files < <(
+              printf '%s\n' "${expected_files[@]}" |
+              sort
+            )
+
+            [[ "${#checksum_files[@]}" -eq 6 ]] || {
+              echo "ERROR: expected exactly six CI payload files" >&2
               exit 1
-            fi
+            }
 
             sha256sum "${checksum_files[@]}" > SHA256SUMS
           )
@@ -276,6 +319,9 @@ jobs:
             ci-artifact/*.deb
             ci-artifact/*.spdx.json
             ci-artifact/PROVENANCE.json
+            ci-artifact/open-ipod-sync-*-source.tar
+            ci-artifact/BUILD-MATERIALS.json
+            ci-artifact/TOOLCHAIN.json
             ci-artifact/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
@@ -374,7 +420,7 @@ jobs:
 
           mkdir -p source-artifact
 
-          archive="source-artifact/open-ipod-sync-${commit}.tar"
+          archive="source-artifact/open-ipod-sync-${commit}-source.tar"
 
           ./tools/make-source-archive.sh \
             "$archive" \
@@ -429,7 +475,7 @@ jobs:
             find source-artifact \
               -maxdepth 1 \
               -type f \
-              -name 'open-ipod-sync-*.tar' \
+              -name 'open-ipod-sync-*-source.tar' \
               -print |
             sort
           )
@@ -458,6 +504,29 @@ jobs:
             }
 
           echo "isolated builder material manifests: PASS"
+
+          cmp -s \
+            baseline/BUILD-MATERIALS.json \
+            reproducibility-matrix/materials/builder-a.json || {
+              echo "ERROR: canonical BUILD-MATERIALS differs from isolated builder" >&2
+              exit 1
+            }
+
+          cmp -s \
+            baseline/TOOLCHAIN.json \
+            reproducibility-matrix/materials/toolchain-a.json || {
+              echo "ERROR: canonical TOOLCHAIN differs from isolated builder" >&2
+              exit 1
+            }
+
+          cmp -s \
+            "baseline/open-ipod-sync-${GITHUB_SHA}-source.tar" \
+            "source-artifact/open-ipod-sync-${GITHUB_SHA}-source.tar" || {
+              echo "ERROR: canonical source archive differs from rebuild source" >&2
+              exit 1
+            }
+
+          echo "canonical public evidence matches isolated evidence: PASS"
       - name: Generate independent SBOM and provenance
         run: |
           set -euo pipefail
@@ -534,6 +603,23 @@ jobs:
             sort
           )
 
+          # baseline/SHA256SUMS covers the complete canonical CI
+          # evidence set.  Isolated rebuild SHA256SUMS files cover only
+          # the reproducible core, so compare the three core payloads
+          # directly and compare a derived core checksum manifest below.
+          mapfile -t baseline_core_names < <(
+            find baseline \
+              -maxdepth 1 \
+              -type f \
+              \( \
+                -name 'ipod-sync_*_amd64.deb' -o \
+                -name '*.spdx.json' -o \
+                -name 'PROVENANCE.json' \
+              \) \
+              -printf '%f\n' |
+            sort
+          )
+
           mapfile -t rebuilt_names < <(
             find rebuilt-bundle \
               -maxdepth 1 \
@@ -550,15 +636,64 @@ jobs:
             sort
           )
 
-          [[ "${#baseline_names[@]}" -eq 4 ]] || {
-            echo "ERROR: baseline bundle should contain exactly four files" >&2
+          mapfile -t rebuilt_core_names < <(
+            find rebuilt-bundle \
+              -maxdepth 1 \
+              -type f \
+              \( \
+                -name 'ipod-sync_*_amd64.deb' -o \
+                -name '*.spdx.json' -o \
+                -name 'PROVENANCE.json' \
+              \) \
+              -printf '%f\n' |
+            sort
+          )
+
+          mapfile -t alternate_core_names < <(
+            find rebuilt-bundle-alt \
+              -maxdepth 1 \
+              -type f \
+              \( \
+                -name 'ipod-sync_*_amd64.deb' -o \
+                -name '*.spdx.json' -o \
+                -name 'PROVENANCE.json' \
+              \) \
+              -printf '%f\n' |
+            sort
+          )
+
+          [[ "${#baseline_names[@]}" -eq 7 ]] || {
+            echo "ERROR: audited baseline should contain exactly seven files" >&2
             printf '%s\n' "${baseline_names[@]}" >&2
             exit 1
           }
 
+          [[ "${#baseline_core_names[@]}" -eq 3 ]] || {
+            echo "ERROR: baseline reproducible core should contain exactly three payload files" >&2
+            printf '%s\n' "${baseline_core_names[@]}" >&2
+            exit 1
+          }
+
+          for evidence in \
+              "open-ipod-sync-${GITHUB_SHA}-source.tar" \
+              BUILD-MATERIALS.json \
+              TOOLCHAIN.json
+          do
+            [[ -f "baseline/$evidence" ]] || {
+              echo "ERROR: canonical evidence missing: $evidence" >&2
+              exit 1
+            }
+          done
+
           [[ "${#rebuilt_names[@]}" -eq 4 ]] || {
             echo "ERROR: rebuilt bundle should contain exactly four files" >&2
             printf '%s\n' "${rebuilt_names[@]}" >&2
+            exit 1
+          }
+
+          [[ "${#rebuilt_core_names[@]}" -eq 3 ]] || {
+            echo "ERROR: rebuilt core should contain exactly three payload files" >&2
+            printf '%s\n' "${rebuilt_core_names[@]}" >&2
             exit 1
           }
 
@@ -568,18 +703,24 @@ jobs:
             exit 1
           }
 
-          diff -u \
-            <(printf '%s\n' "${baseline_names[@]}") \
-            <(printf '%s\n' "${rebuilt_names[@]}")
+          [[ "${#alternate_core_names[@]}" -eq 3 ]] || {
+            echo "ERROR: alternate core should contain exactly three payload files" >&2
+            printf '%s\n' "${alternate_core_names[@]}" >&2
+            exit 1
+          }
 
           diff -u \
-            <(printf '%s\n' "${rebuilt_names[@]}") \
-            <(printf '%s\n' "${alternate_names[@]}")
+            <(printf '%s\n' "${baseline_core_names[@]}") \
+            <(printf '%s\n' "${rebuilt_core_names[@]}")
+
+          diff -u \
+            <(printf '%s\n' "${rebuilt_core_names[@]}") \
+            <(printf '%s\n' "${alternate_core_names[@]}")
 
           echo
           echo "===== BASELINE vs SOURCE-ARCHIVE BUILDER A ====="
 
-          for name in "${baseline_names[@]}"; do
+          for name in "${baseline_core_names[@]}"; do
             cmp -s \
               "baseline/$name" \
               "rebuilt-bundle/$name" || {
@@ -593,7 +734,7 @@ jobs:
           echo
           echo "===== BUILDER A vs VARIED-ENVIRONMENT BUILDER B ====="
 
-          for name in "${rebuilt_names[@]}"; do
+          for name in "${rebuilt_core_names[@]}"; do
             cmp -s \
               "rebuilt-bundle/$name" \
               "rebuilt-bundle-alt/$name" || {
@@ -605,8 +746,40 @@ jobs:
           done
 
           echo
+          echo "===== CORE CHECKSUM MANIFEST IDENTITY ====="
+
+          (
+            cd baseline
+            sha256sum "${baseline_core_names[@]}"
+          ) > baseline-core-SHA256SUMS
+
+          cmp -s \
+            baseline-core-SHA256SUMS \
+            rebuilt-bundle/SHA256SUMS || {
+              echo "ERROR: baseline-derived core checksum manifest differs from builder A" >&2
+              diff -u \
+                baseline-core-SHA256SUMS \
+                rebuilt-bundle/SHA256SUMS >&2 || true
+              exit 1
+            }
+
+          cmp -s \
+            baseline-core-SHA256SUMS \
+            rebuilt-bundle-alt/SHA256SUMS || {
+              echo "ERROR: baseline-derived core checksum manifest differs from builder B" >&2
+              diff -u \
+                baseline-core-SHA256SUMS \
+                rebuilt-bundle-alt/SHA256SUMS >&2 || true
+              exit 1
+            }
+
+          echo "baseline-derived core SHA256SUMS vs builder A: PASS"
+          echo "baseline-derived core SHA256SUMS vs builder B: PASS"
+
+          echo
           echo "============================================================"
-          echo "PASS: complete audited supply-chain bundle is reproducible"
+          echo "PASS: reproducible core payloads are byte-identical"
+          echo "PASS: reproducible core checksum manifests are identical"
           echo "PASS: varied build environments are byte-identical"
           echo "============================================================"
       - name: Configure pinned Debian 11 snapshot
@@ -1097,6 +1270,7 @@ jobs:
 
           debs=(attested/ipod-sync_*_amd64.deb)
           sboms=(attested/*.spdx.json)
+          sources=(attested/open-ipod-sync-*-source.tar)
 
           [[ "${#debs[@]}" -eq 1 ]] || {
             echo "ERROR: expected exactly one Debian package; found ${#debs[@]}" >&2
@@ -1105,6 +1279,26 @@ jobs:
 
           [[ "${#sboms[@]}" -eq 1 ]] || {
             echo "ERROR: expected exactly one SPDX SBOM; found ${#sboms[@]}" >&2
+            exit 1
+          }
+
+          [[ "${#sources[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one source archive; found ${#sources[@]}" >&2
+            exit 1
+          }
+
+          [[ "$(basename "${sources[0]}")" ==               "open-ipod-sync-${GITHUB_SHA}-source.tar" ]] || {
+            echo "ERROR: source archive name does not match commit" >&2
+            exit 1
+          }
+
+          [[ -f attested/BUILD-MATERIALS.json ]] || {
+            echo "ERROR: BUILD-MATERIALS.json missing" >&2
+            exit 1
+          }
+
+          [[ -f attested/TOOLCHAIN.json ]] || {
+            echo "ERROR: TOOLCHAIN.json missing" >&2
             exit 1
           }
 
@@ -1130,6 +1324,9 @@ jobs:
             attested/*.deb
             attested/*.spdx.json
             attested/PROVENANCE.json
+            attested/open-ipod-sync-*-source.tar
+            attested/BUILD-MATERIALS.json
+            attested/TOOLCHAIN.json
             attested/SHA256SUMS
 
       - name: Attest Debian package with SPDX SBOM
