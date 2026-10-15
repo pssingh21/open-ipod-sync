@@ -9,6 +9,12 @@ This project interoperates with and/or redistributes pieces from established fre
   1.2.0 at runtime. Ubuntu 26.04 currently ships `ifuse` 1.2.0-2, so the
   supported Ubuntu 26.04 path uses upstream `ifuse` 1.2.1 under `/usr/local`
   until the distro package is updated.
+  `tools/prepare-host.sh` may fetch the official upstream `ifuse` 1.2.1 source
+  from `libimobiledevice/ifuse` and install it under `/usr/local` when the
+  host distro supplies the known-unsafe 1.2.0 release. The bootstrap verifies
+  the expected 1.2.1 release commit before installation; the source is not
+  vendored into the `open-ipod-sync` package build.
+
 - **FFmpeg**: system dependency for audio probing/transcoding; not vendored.
 
 `native/sign-cdb.c` implements legacy Hash72-compatible signing behavior and derives device-specific signing material from the current device's own `HashInfo` and live Apple-signed CDB. No captured device RND/IV/signature is shipped.

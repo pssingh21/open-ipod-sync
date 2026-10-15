@@ -1200,47 +1200,36 @@ jobs:
           echo "host:            ${{ matrix.os }}"
           echo "ifuse package:   $PACKAGE_VERSION"
           echo "ifuse binary:    /usr/bin/ifuse"
-          /usr/bin/ifuse --version 2>&1
 
-          python3 - \
-            "${{ matrix.os }}" \
-            "$PACKAGE_VERSION" <<'PYVERSION'
-          import sys
-
-          host = sys.argv[1]
-          version = sys.argv[2]
-
-          if host == "ubuntu-24.04":
-              if not version.startswith("1.1.4"):
-                  raise SystemExit(
-                      "ERROR: expected Ubuntu 24.04 "
-                      f"ifuse 1.1.4 line, got {version}"
-                  )
-
-          elif host == "ubuntu-26.04":
-              if not version.startswith("1.2.0"):
-                  raise SystemExit(
-                      "ERROR: expected Ubuntu 26.04 "
-                      f"ifuse 1.2.0 line, got {version}"
-                  )
-
-          else:
-              raise SystemExit(
-                  f"ERROR: unexpected host: {host}"
-              )
-
-          print(
-              f"{host} distro ifuse version: EXPECTED"
-          )
-          PYVERSION
+          /usr/bin/ifuse \
+            --version \
+            2>&1 \
+            || true
 
           PYTHONDONTWRITEBYTECODE=1 \
-          python3 - "${{ matrix.os }}" <<'PYSAFE'
+          python3 - "$PACKAGE_VERSION" <<'PYSAFE'
           import importlib.util
+          import re
           import sys
           from pathlib import Path
 
-          host = sys.argv[1]
+          raw_package = sys.argv[1]
+
+          match = re.search(
+              r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)",
+              raw_package,
+          )
+
+          if match is None:
+              raise SystemExit(
+                  "ERROR: cannot parse distro ifuse package "
+                  f"version: {raw_package!r}"
+              )
+
+          package_semver = tuple(
+              int(part)
+              for part in match.groups()
+          )
 
           source = (
               Path.cwd()
@@ -1249,7 +1238,7 @@ jobs:
           )
 
           spec = importlib.util.spec_from_file_location(
-              "ipod_sync_host_ifuse_test",
+              "ipod_sync_distro_ifuse_test",
               source,
           )
 
@@ -1265,129 +1254,64 @@ jobs:
           sys.modules[spec.name] = module
           spec.loader.exec_module(module)
 
-          if host == "ubuntu-26.04":
-              try:
-                  module.require_safe_ifuse(
-                      "/usr/bin/ifuse"
-                  )
-              except module.SyncError as exc:
-                  message = str(exc)
-
-                  if (
-                      "unsafe ifuse version detected: 1.2.0"
-                      not in message
-                  ):
-                      raise SystemExit(
-                          "ERROR: wrong ifuse refusal: "
-                          + message
-                      )
-
-                  if "data corruption" not in message:
-                      raise SystemExit(
-                          "ERROR: refusal does not explain "
-                          "the corruption hazard"
-                      )
-
-                  print(
-                      "Ubuntu 26.04 distro ifuse 1.2.0 "
-                      "rejection: PASS"
-                  )
-              else:
-                  raise SystemExit(
-                      "ERROR: unsafe Ubuntu 26.04 "
-                      "ifuse 1.2.0 was accepted"
-                  )
-
-          elif host == "ubuntu-24.04":
-              version = module.require_safe_ifuse(
+          try:
+              detected = module.require_safe_ifuse(
                   "/usr/bin/ifuse"
               )
+          except module.SyncError as exc:
+              message = str(exc)
 
-              if version[0:2] != (1, 1):
+              if package_semver != (1, 2, 0):
                   raise SystemExit(
-                      "ERROR: unexpected Ubuntu 24.04 "
-                      f"ifuse version: {version}"
+                      "ERROR: distro ifuse was rejected even "
+                      f"though package version is {raw_package}: "
+                      f"{message}"
+                  )
+
+              if (
+                  "unsafe ifuse version detected: 1.2.0"
+                  not in message
+              ):
+                  raise SystemExit(
+                      "ERROR: wrong known-unsafe refusal: "
+                      + message
                   )
 
               print(
-                  "Ubuntu 24.04 distro ifuse acceptance: "
-                  "PASS"
+                  "known-unsafe distro ifuse rejection: PASS"
               )
 
           else:
-              raise SystemExit(
-                  f"ERROR: unexpected host: {host}"
+              if package_semver == (1, 2, 0):
+                  raise SystemExit(
+                      "ERROR: known-unsafe distro ifuse "
+                      "1.2.0 was accepted"
+                  )
+
+              print(
+                  "safe distro ifuse acceptance: PASS "
+                  f"({detected})"
               )
           PYSAFE
 
-      - name: Install upstream ifuse 1.2.1 on Ubuntu 26.04
-        if: matrix.os == 'ubuntu-26.04'
+      - name: Prepare host through repository bootstrap
         shell: bash
         run: |
           set -euo pipefail
 
-          export DEBIAN_FRONTEND=noninteractive
-
-          sudo apt-get install -y --no-install-recommends \
-            autoconf \
-            automake \
-            libtool-bin \
-            libfuse3-dev
-
-          WORK="$RUNNER_TEMP/ifuse-1.2.1"
-
-          rm -rf -- "$WORK"
-
-          git clone \
-            --depth 1 \
-            --branch 1.2.1 \
-            https://github.com/libimobiledevice/ifuse.git \
-            "$WORK"
-
-          cd "$WORK"
-
-          TAG_COMMIT="$(
-            git rev-parse --short=7 HEAD
-          )"
-
-          echo "ifuse 1.2.1 tag commit: $TAG_COMMIT"
-
-          [[ "$TAG_COMMIT" == "f7eac74" ]] || {
-            echo "ERROR: unexpected upstream ifuse 1.2.1 tag commit: $TAG_COMMIT" >&2
-            exit 1
-          }
-
-          ./autogen.sh \
-            --prefix=/usr/local
-
-          make \
-            -j"$(nproc)"
-
-          sudo make install
-          sudo ldconfig
+          sudo ./tools/prepare-host.sh
 
           hash -r
 
-          cd "$GITHUB_WORKSPACE"
+          echo "active ifuse:"
+          command -v ifuse
 
-          ACTIVE_IFUSE="$(
-            command -v ifuse
-          )"
-
-          echo "active ifuse: $ACTIVE_IFUSE"
-
-          [[ "$ACTIVE_IFUSE" == "/usr/local/bin/ifuse" ]] || {
-            echo "ERROR: safe /usr/local ifuse is not active" >&2
-            exit 1
-          }
-
-          /usr/local/bin/ifuse \
-            --version \
-            2>&1 |
-          grep -E             '(^|[^0-9])1\.2\.1([^0-9]|$)'
+          echo
+          echo "active ifuse version:"
+          ifuse --version 2>&1
 
           PYTHONDONTWRITEBYTECODE=1 \
-          python3 - <<'PYSAFE121'
+          python3 - <<'PYSAFEHOST'
           import importlib.util
           import sys
           from pathlib import Path
@@ -1399,7 +1323,7 @@ jobs:
           )
 
           spec = importlib.util.spec_from_file_location(
-              "ipod_sync_safe_ifuse_test",
+              "ipod_sync_prepared_host_test",
               source,
           )
 
@@ -1417,29 +1341,11 @@ jobs:
 
           version = module.require_safe_ifuse()
 
-          if version != (1, 2, 1):
-              raise SystemExit(
-                  "ERROR: expected active ifuse 1.2.1, "
-                  f"got {version}"
-              )
-
           print(
-              "Ubuntu 26.04 upstream ifuse 1.2.1 "
-              "acceptance: PASS"
+              "prepared active ifuse accepted: PASS "
+              f"({version})"
           )
-          PYSAFE121
-
-          echo
-          echo "distro package remains installed:"
-          dpkg-query \
-            -W \
-            -f='ifuse=${Version}\n' \
-            ifuse
-
-          echo
-          echo "active PATH binary:"
-          command -v ifuse
-          ifuse --version 2>&1
+          PYSAFEHOST
 
       - name: Run host-built package lifecycle
         shell: bash

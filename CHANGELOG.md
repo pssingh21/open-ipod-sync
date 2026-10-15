@@ -16,6 +16,8 @@ All notable public changes to `open-ipod-sync` will be documented here.
 
 ### Compatibility
 
+- Add `tools/prepare-host.sh` so Debian/Ubuntu source-build users can prepare the complete host runtime from the repository. The helper automatically replaces the known-unsafe Ubuntu 26.04 `ifuse` 1.2.0 runtime with pinned upstream 1.2.1 under `/usr/local`, while keeping networked host preparation outside the reproducible package-build boundary.
+
 - Add an explicit Ubuntu 26.04 CI contract for the distro-provided
   `ifuse` 1.2.0-2 hazard: prove that it is rejected, install upstream
   1.2.1 under `/usr/local`, prove that the safe runtime is selected, and

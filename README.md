@@ -597,6 +597,45 @@ git clone https://github.com/pssingh21/open-ipod-sync.git
 cd open-ipod-sync
 ```
 
+## Prepare a Debian or Ubuntu source-build host
+
+For Debian/Ubuntu source builds, the recommended first step is:
+
+```bash
+sudo ./tools/prepare-host.sh
+```
+
+This repository-owned host bootstrap:
+
+- installs the build and runtime packages needed by `open-ipod-sync`;
+- checks the active `ifuse` runtime;
+- leaves safe distro releases such as Ubuntu 24.04's 1.1.4 line unchanged;
+- detects the known-unsafe upstream `ifuse` 1.2.0 line, including Ubuntu
+  26.04's current `1.2.0-2` package;
+- refuses to replace `ifuse` while an `ifuse` filesystem is mounted;
+- builds the pinned upstream 1.2.1 release under `/usr/local` when remediation
+  is required;
+- verifies the expected upstream release commit before installation; and
+- keeps the distro `ifuse` package installed for normal Debian dependency
+  resolution.
+
+After host preparation:
+
+```bash
+./build-deb.sh
+sudo apt install ./dist/ipod-sync_*.deb
+
+ipod-sync doctor
+ipod-sync mount-ro
+```
+
+The networked host-preparation phase is intentionally separate from
+`build-deb.sh`. `prepare-host.sh` may access Debian/Ubuntu package repositories
+and the official upstream `ifuse` repository. The canonical Debian package
+build remains the project's reproducible, network-isolated,
+material-recorded, tool-resolution-confined build and does not download
+`ifuse` or invoke `prepare-host.sh`.
+
 ## Install build dependencies
 
 On Debian/Ubuntu:

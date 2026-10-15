@@ -700,3 +700,21 @@ baseline. This preserves operation on the supported Linux 5.10 environment,
 where Landlock is not available, while keeping the implemented guarantees
 portable and directly testable.
 <!-- PR4_REPRO_ISOLATION_MODEL_END -->
+
+## Host preparation versus package construction
+
+`tools/prepare-host.sh` is an operator bootstrap phase, not part of the
+canonical deterministic package build.
+
+The bootstrap may use the Debian/Ubuntu package network and, only when the
+active host runtime is the known-unsafe `ifuse` 1.2.0 line, fetch the pinned
+upstream `ifuse` 1.2.1 source and install it under `/usr/local`.
+
+This networked host-remediation phase is kept outside `build-deb.sh`.
+Consequently, adding automatic Ubuntu 26.04 remediation does not broaden the
+project's reproducible-build claim or introduce network access into the
+canonical package-construction boundary.
+
+The distro `ifuse` package remains installed for package dependency
+resolution. Runtime command resolution prefers `/usr/local/bin/ifuse` when the
+bootstrap had to remediate an unsafe distro version.
