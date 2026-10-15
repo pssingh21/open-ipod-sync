@@ -297,4 +297,82 @@ assert "require_safe_ifuse(path)" in doctor_source
 assert '"UNSAFE"' in doctor_source
 
 
+
+# ---------------------------------------------------------------------------
+# Repository-level Ubuntu 26.04 compatibility contract.
+# ---------------------------------------------------------------------------
+
+ci = (
+    ROOT
+    / ".github"
+    / "workflows"
+    / "ci.yml"
+).read_text()
+
+readme = (
+    ROOT
+    / "README.md"
+).read_text()
+
+architecture = (
+    ROOT
+    / "docs"
+    / "ARCHITECTURE.md"
+).read_text()
+
+third_party = (
+    ROOT
+    / "THIRD_PARTY.md"
+).read_text()
+
+changelog = (
+    ROOT
+    / "CHANGELOG.md"
+).read_text()
+
+
+for token in (
+    "Verify distro ifuse safety contract",
+    "Install upstream ifuse 1.2.1 on Ubuntu 26.04",
+    'if: matrix.os == \'ubuntu-26.04\'',
+    "unsafe ifuse version detected: 1.2.0",
+    "f7eac74",
+    "/usr/local/bin/ifuse",
+    "Ubuntu 26.04 distro ifuse 1.2.0 ",
+    "rejection: PASS",
+    "Ubuntu 26.04 upstream ifuse 1.2.1 ",
+    "acceptance: PASS",
+):
+    assert token in ci, token
+
+
+for token in (
+    "### ifuse 1.2.0 safety requirement",
+    "Ubuntu 26.04 (Resolute)",
+    "`1.2.0-2`",
+    "`/usr/local/bin/ifuse`",
+    "https://github.com/libimobiledevice/ifuse",
+    "https://packages.ubuntu.com/resolute/amd64/utils/ifuse",
+):
+    assert token in readme, token
+
+
+for token in (
+    "device trust boundary",
+    "Upstream `ifuse` 1.2.0",
+    "repeated reads",
+    "SHA-256",
+):
+    assert token in architecture, token
+
+
+assert (
+    "`ifuse` 1.2.0 is explicitly unsupported"
+    in third_party
+)
+
+assert "## Unreleased" in changelog
+assert "ifuse` 1.2.0-2 hazard" in changelog
+
+
 print("ifuse safety tests: PASS")
