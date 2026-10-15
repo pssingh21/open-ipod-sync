@@ -27,6 +27,10 @@ All notable public changes to `open-ipod-sync` will be documented here.
   enforced by `open-ipod-sync` rather than an unsatisfiable
   `ifuse (>= 1.2.1)` package dependency on Ubuntu 26.04.
 
+### Fixed
+
+- Corrected the bundled libgpod 0.8.3 `PlayCounts.plist` parser to address inline `GValue` elements correctly, preventing a `libgpod-add` segmentation fault during candidate parsing.
+
 ## 0.2.0-alpha.7 — 2026-10-14
 
 Host compatibility and binary-packaging portability hardening.

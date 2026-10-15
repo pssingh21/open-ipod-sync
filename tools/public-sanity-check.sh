@@ -27,6 +27,7 @@ PY
 
 # Public-alpha regression tests.
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_public_alpha.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_libgpod_playcounts_fix.py"
 
 # ifuse runtime/data-integrity safety regression tests.
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_ifuse_safety.py"
