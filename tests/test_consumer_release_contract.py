@@ -25,6 +25,17 @@ VERIFIER = (
     / "verify-release.py"
 ).read_text()
 
+README = (
+    ROOT
+    / "README.md"
+).read_text()
+
+RUNBOOK = (
+    ROOT
+    / "docs"
+    / "RELEASE-RUNBOOK.md"
+).read_text()
+
 
 def require(
     text: str,
@@ -169,6 +180,58 @@ for token in (
         "exact release asset contract",
     )
 
+
+# Consumer-facing documentation is part of the release contract.
+for token in (
+    "## Independently verify a release",
+    "Every new release publishes enough evidence",
+    "exactly these eight assets",
+    "BUILD-MATERIALS.json",
+    "TOOLCHAIN.json",
+    "open-ipod-sync-<40-character-commit>-source.tar",
+    "python3 tools/verify-release.py",
+    "--expected-commit",
+    "--expected-repository",
+    "--github",
+    "--repo",
+    "--tag",
+    "offline operation",
+    "never reads or modifies the music source directory",
+):
+    require(
+        README,
+        token,
+        "README consumer verification documentation",
+    )
+
+for token in (
+    "## Independent consumer verification contract",
+    "exact eight-asset contract",
+    "CI evidence entering the release workflow",
+    "Post-publication verification",
+    "independent consumer verifier",
+    "Failure handling",
+    "immutable release",
+    "Trust-boundary statement",
+    "NAS/source-library read-only invariant is unchanged",
+):
+    require(
+        RUNBOOK,
+        token,
+        "release runbook consumer verification documentation",
+    )
+
+for forbidden in (
+    "fully hermetic build",
+    "fully-hermetic build",
+):
+    if forbidden in README or forbidden in RUNBOOK:
+        raise SystemExit(
+            "ERROR: documentation contains unsupported "
+            f"hermeticity claim: {forbidden}"
+        )
+
+print("consumer verification documentation: PASS")
 
 print("canonical consumer evidence in CI: PASS")
 print("canonical consumer evidence in release: PASS")
