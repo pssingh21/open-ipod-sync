@@ -1635,3 +1635,21 @@ material-recorded, tool-resolution-confined build**. The current Debian 11
 baseline does not require Landlock or another filesystem-read sandbox, which
 keeps the reproducibility gate usable on the supported Linux 5.10 environment.
 <!-- PR4_BUILD_ISOLATION_SCOPE_END -->
+
+<!-- REPOSITORY_POLICY_BEGIN -->
+## Repository security and release policy
+
+GitHub-side branch protection, required checks, Actions permissions, security
+controls, release-environment protection, immutable releases, and version-tag
+protection are documented in
+[`docs/REPOSITORY-POLICY.md`](docs/REPOSITORY-POLICY.md).
+
+Maintainers can verify the live GitHub configuration without modifying it:
+
+```bash
+python3 tools/audit-repository-policy.py
+```
+
+The repository-policy audit is independent of synchronization data and never
+accesses or modifies the configured music source, NAS content, or iPod.
+<!-- REPOSITORY_POLICY_END -->
