@@ -480,6 +480,7 @@ with tempfile.TemporaryDirectory() as td:
         )
 
     with patched(
+        require_safe_ifuse=lambda binary=None: (1, 1, 3),
         PROJECT=project,
         SYNC_ENVELOPE=sync_envelope,
         SIGN_CDB_SRC=sign_cdb,

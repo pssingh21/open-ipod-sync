@@ -333,10 +333,16 @@ def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
     """Return the installed ifuse semantic version without touching the device."""
     binary = binary or require_cmd("ifuse")
 
-    result = run(
-        [binary, "--version"],
-        check=False,
-    )
+    try:
+        result = run(
+            [binary, "--version"],
+            check=False,
+        )
+    except OSError as exc:
+        raise SyncError(
+            "unable to determine ifuse version: "
+            f"failed to execute {binary}: {exc}"
+        ) from exc
 
     if result.returncode != 0:
         raise SyncError(

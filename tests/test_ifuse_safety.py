@@ -145,6 +145,29 @@ assert "1.2.1 or later" in message
 
 
 # ---------------------------------------------------------------------------
+# A binary that disappears or cannot be executed must fail closed as SyncError.
+# ---------------------------------------------------------------------------
+
+def missing_ifuse_run(cmd, **kwargs):
+    raise FileNotFoundError(
+        f"synthetic missing executable: {cmd[0]}"
+    )
+
+
+with patched(
+    run=missing_ifuse_run,
+):
+    message = expect_sync_error(
+        lambda: m.require_safe_ifuse(
+            "/synthetic/missing-ifuse"
+        ),
+        "unable to determine ifuse version",
+    )
+
+assert "failed to execute" in message
+
+
+# ---------------------------------------------------------------------------
 # Version command failure is fail-closed.
 # ---------------------------------------------------------------------------
 
