@@ -2,6 +2,29 @@
 
 All notable public changes to `open-ipod-sync` will be documented here.
 
+## Unreleased
+
+### Security
+
+- Reject upstream `ifuse` 1.2.0 before trusting an existing iPod mount or
+  creating/remounting an `ifuse` filesystem. Upstream identifies 1.2.0 as
+  having a serious data-corruption bug fixed in 1.2.1.
+- Require repeated byte-stable reads of live Apple SQLite databases before
+  accepting database-integrity results.
+- Report an unsafe `ifuse` runtime as `UNSAFE` / `NOT READY` from
+  `ipod-sync doctor`.
+
+### Compatibility
+
+- Add an explicit Ubuntu 26.04 CI contract for the distro-provided
+  `ifuse` 1.2.0-2 hazard: prove that it is rejected, install upstream
+  1.2.1 under `/usr/local`, prove that the safe runtime is selected, and
+  then run package lifecycle validation.
+- Preserve Ubuntu 24.04 compatibility with its older 1.1.4 `ifuse` line.
+- Keep the Debian package dependency as plain `ifuse`; runtime safety is
+  enforced by `open-ipod-sync` rather than an unsatisfiable
+  `ifuse (>= 1.2.1)` package dependency on Ubuntu 26.04.
+
 ## 0.2.0-alpha.7 — 2026-10-14
 
 Host compatibility and binary-packaging portability hardening.

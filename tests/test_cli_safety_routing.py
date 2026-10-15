@@ -116,6 +116,8 @@ def common_normal_patches(root, source, mount, events, candidate):
             lambda guard: events.append("source-recheck"),
         "sqlite_integrity":
             lambda path: "ok",
+        "require_stable_file_read":
+            lambda path, attempts=3: "synthetic-stable",
         "build_candidate":
             lambda s, mnt, run: (
                 events.append("build-candidate")
@@ -349,6 +351,8 @@ with tempfile.TemporaryDirectory() as td:
         assert_no_write_roots_on_source=lambda g, mnt:
             events.append("source-isolation"),
         sqlite_integrity=lambda path: "ok",
+        require_stable_file_read=lambda path, attempts=3:
+            "synthetic-stable",
         recheck_source_guard=lambda guard:
             events.append("source-recheck"),
         build_candidate=lambda s, mnt, run:
@@ -476,6 +480,7 @@ with tempfile.TemporaryDirectory() as td:
         )
 
     with patched(
+        require_safe_ifuse=lambda binary=None: (1, 1, 3),
         PROJECT=project,
         SYNC_ENVELOPE=sync_envelope,
         SIGN_CDB_SRC=sign_cdb,
@@ -751,6 +756,8 @@ with tempfile.TemporaryDirectory() as td:
         assert_no_write_roots_on_source=lambda g, mnt:
             events.append("source-isolation"),
         sqlite_integrity=lambda path: "ok",
+        require_stable_file_read=lambda path, attempts=3:
+            "synthetic-stable",
         recheck_source_guard=lambda guard:
             events.append("source-recheck"),
         build_candidate=lambda s, mnt, run:

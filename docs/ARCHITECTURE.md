@@ -140,6 +140,25 @@ the same safety decision.
 
 The normal device state is a read-only `ifuse` mount.
 
+
+`ifuse` is also part of the device trust boundary. Upstream `ifuse` 1.2.0 is
+explicitly rejected because that release has a known FUSE initialization bug
+that can return corrupted device data. The runtime checks the active `ifuse`
+version before trusting an existing mount and before creating or changing an
+`ifuse` mount.
+
+For live Apple SQLite databases, version validation is not the only protection.
+Before the planner trusts the database contents, repeated reads must produce
+stable file metadata and identical SHA-256 content. A changing byte stream
+fails closed before SQLite integrity results are accepted. This provides a
+generic second barrier against future device-filesystem read-consistency
+regressions.
+
+Ubuntu 26.04 currently demonstrates why both barriers exist: its distro package
+is `ifuse` 1.2.0-2. CI proves that runtime is rejected, then installs upstream
+1.2.1 under `/usr/local` and proves the safe runtime is accepted before package
+lifecycle testing continues.
+
 A typical operator flow is:
 
 ```bash

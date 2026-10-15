@@ -298,6 +298,99 @@ ipod-sync mount-ro
 
 The tool uses `ifuse` and mounts the device at the configured `IPOD_SYNC_MOUNT`.
 
+
+### ifuse 1.2.0 safety requirement
+
+Do **not** use upstream `ifuse` 1.2.0 with `open-ipod-sync`.
+
+Upstream identifies 1.2.0 as having a serious data-corruption bug in its FUSE
+initialization behavior. The defect is fixed in `ifuse` 1.2.1.
+`open-ipod-sync` therefore refuses to mount through or trust a device mounted
+with `ifuse` 1.2.0.
+
+At the time this guard was introduced, Ubuntu 26.04 (Resolute) provides
+`ifuse` `1.2.0-2` from the Ubuntu archive. Ubuntu 24.04 uses the older
+1.1.4 line and is not affected by this specific regression.
+
+Check the active version before mounting an iPod:
+
+```bash
+command -v ifuse
+ifuse --version
+dpkg-query -W -f='${Version}\n' ifuse
+```
+
+If the active version is 1.2.0, do not run `plan` or `sync` through that mount.
+Unmount an existing iPod mount first:
+
+```bash
+ipod-sync unmount
+```
+
+On Ubuntu 26.04, until the Ubuntu archive supplies a fixed `ifuse`, install
+upstream 1.2.1 under `/usr/local`:
+
+```bash
+sudo apt update
+
+sudo apt install \
+  build-essential \
+  pkg-config \
+  git \
+  autoconf \
+  automake \
+  libtool-bin \
+  libplist-dev \
+  libimobiledevice-dev \
+  libfuse3-dev \
+  usbmuxd
+
+work="$(mktemp -d)"
+
+git clone \
+  --depth 1 \
+  --branch 1.2.1 \
+  https://github.com/libimobiledevice/ifuse.git \
+  "$work/ifuse"
+
+cd "$work/ifuse"
+
+test "$(git rev-parse --short=7 HEAD)" = "f7eac74"
+
+./autogen.sh --prefix=/usr/local
+make -j"$(nproc)"
+sudo make install
+sudo ldconfig
+
+hash -r
+
+command -v ifuse
+ifuse --version
+```
+
+The active binary should resolve to `/usr/local/bin/ifuse` and report version
+1.2.1. The Ubuntu `ifuse` package may remain installed to satisfy normal Debian
+package dependency resolution; the safe `/usr/local/bin/ifuse` takes precedence
+in the normal shell `PATH`.
+
+Then verify readiness:
+
+```bash
+ipod-sync doctor
+```
+
+If Ubuntu later ships `ifuse` 1.2.1 or newer, the manual `/usr/local`
+installation is no longer required for this specific issue.
+
+Upstream references:
+
+- <https://github.com/libimobiledevice/ifuse>
+- <https://github.com/libimobiledevice/ifuse/releases/tag/1.2.1>
+
+Ubuntu 26.04 package reference:
+
+- <https://packages.ubuntu.com/resolute/amd64/utils/ifuse>
+
 Verify it with:
 
 ```bash
@@ -964,6 +1057,13 @@ Host compatibility is validated on:
 
 - Ubuntu 24.04; and
 - Ubuntu 26.04.
+
+
+The Ubuntu 26.04 compatibility job additionally exercises the `ifuse` safety
+boundary. It verifies that the distro-provided 1.2.0 release is rejected,
+installs upstream 1.2.1 under `/usr/local`, verifies that the safe binary is
+selected by `PATH`, and then runs the package lifecycle against that safe
+runtime. Ubuntu 24.04 continues to exercise its distro-provided 1.1.4 line.
 
 This keeps package reproducibility separate from runtime host compatibility.
 

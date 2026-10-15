@@ -142,11 +142,53 @@ echo
 echo "===== APPLICATION VERSION ====="
 
 APP="$PAYLOAD/usr/lib/ipod-sync/ipod_sync.py"
+WRAPPER="$PAYLOAD/usr/bin/ipod-sync"
 
 [[ -f "$APP" ]] || {
   echo "FAIL: packaged application missing: $APP" >&2
   exit 1
 }
+
+[[ -x "$WRAPPER" ]] || {
+  echo "FAIL: packaged wrapper missing or not executable: $WRAPPER" >&2
+  exit 1
+}
+
+grep -Fq   'unsafe ifuse version detected: 1.2.0'   "$APP" || {
+    echo "FAIL: Python ifuse 1.2.0 safety gate missing" >&2
+    exit 1
+  }
+
+grep -Fq   'require_stable_file_read'   "$APP" || {
+    echo "FAIL: live-file stability gate missing" >&2
+    exit 1
+  }
+
+grep -Fq   'require_safe_ifuse() {'   "$WRAPPER" || {
+    echo "FAIL: wrapper ifuse safety gate missing" >&2
+    exit 1
+  }
+
+grep -Fq   'unsafe ifuse version detected: 1.2.0'   "$WRAPPER" || {
+    echo "FAIL: wrapper ifuse 1.2.0 refusal missing" >&2
+    exit 1
+  }
+
+grep -Fq \
+  '_debian_ifuse_known_unsafe_version' \
+  "$APP" || {
+    echo "FAIL: Debian ifuse unsafe-version fallback missing" >&2
+    exit 1
+  }
+
+grep -Fq \
+  'dpkg-query' \
+  "$WRAPPER" || {
+    echo "FAIL: wrapper Debian ifuse fallback missing" >&2
+    exit 1
+  }
+
+echo "ifuse runtime safety contract: PASS"
 
 ACTUAL_APP_VERSION="$(python3 "$APP" --version)"
 

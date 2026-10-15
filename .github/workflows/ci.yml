@@ -1185,6 +1185,262 @@ jobs:
             usbmuxd \
             ffmpeg
 
+      - name: Verify distro ifuse safety contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_VERSION="$(
+            dpkg-query \
+              -W \
+              -f='${Version}' \
+              ifuse
+          )"
+
+          echo "host:            ${{ matrix.os }}"
+          echo "ifuse package:   $PACKAGE_VERSION"
+          echo "ifuse binary:    /usr/bin/ifuse"
+          /usr/bin/ifuse --version 2>&1
+
+          python3 - \
+            "${{ matrix.os }}" \
+            "$PACKAGE_VERSION" <<'PYVERSION'
+          import sys
+
+          host = sys.argv[1]
+          version = sys.argv[2]
+
+          if host == "ubuntu-24.04":
+              if not version.startswith("1.1.4"):
+                  raise SystemExit(
+                      "ERROR: expected Ubuntu 24.04 "
+                      f"ifuse 1.1.4 line, got {version}"
+                  )
+
+          elif host == "ubuntu-26.04":
+              if not version.startswith("1.2.0"):
+                  raise SystemExit(
+                      "ERROR: expected Ubuntu 26.04 "
+                      f"ifuse 1.2.0 line, got {version}"
+                  )
+
+          else:
+              raise SystemExit(
+                  f"ERROR: unexpected host: {host}"
+              )
+
+          print(
+              f"{host} distro ifuse version: EXPECTED"
+          )
+          PYVERSION
+
+          PYTHONDONTWRITEBYTECODE=1 \
+          python3 - "${{ matrix.os }}" <<'PYSAFE'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          host = sys.argv[1]
+
+          source = (
+              Path.cwd()
+              / "src"
+              / "ipod_sync.py"
+          )
+
+          spec = importlib.util.spec_from_file_location(
+              "ipod_sync_host_ifuse_test",
+              source,
+          )
+
+          if spec is None or spec.loader is None:
+              raise SystemExit(
+                  "ERROR: unable to load ipod_sync.py"
+              )
+
+          module = importlib.util.module_from_spec(
+              spec
+          )
+
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+
+          if host == "ubuntu-26.04":
+              try:
+                  module.require_safe_ifuse(
+                      "/usr/bin/ifuse"
+                  )
+              except module.SyncError as exc:
+                  message = str(exc)
+
+                  if (
+                      "unsafe ifuse version detected: 1.2.0"
+                      not in message
+                  ):
+                      raise SystemExit(
+                          "ERROR: wrong ifuse refusal: "
+                          + message
+                      )
+
+                  if "data corruption" not in message:
+                      raise SystemExit(
+                          "ERROR: refusal does not explain "
+                          "the corruption hazard"
+                      )
+
+                  print(
+                      "Ubuntu 26.04 distro ifuse 1.2.0 "
+                      "rejection: PASS"
+                  )
+              else:
+                  raise SystemExit(
+                      "ERROR: unsafe Ubuntu 26.04 "
+                      "ifuse 1.2.0 was accepted"
+                  )
+
+          elif host == "ubuntu-24.04":
+              version = module.require_safe_ifuse(
+                  "/usr/bin/ifuse"
+              )
+
+              if version[0:2] != (1, 1):
+                  raise SystemExit(
+                      "ERROR: unexpected Ubuntu 24.04 "
+                      f"ifuse version: {version}"
+                  )
+
+              print(
+                  "Ubuntu 24.04 distro ifuse acceptance: "
+                  "PASS"
+              )
+
+          else:
+              raise SystemExit(
+                  f"ERROR: unexpected host: {host}"
+              )
+          PYSAFE
+
+      - name: Install upstream ifuse 1.2.1 on Ubuntu 26.04
+        if: matrix.os == 'ubuntu-26.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          sudo apt-get install -y --no-install-recommends \
+            autoconf \
+            automake \
+            libtool-bin \
+            libfuse3-dev
+
+          WORK="$RUNNER_TEMP/ifuse-1.2.1"
+
+          rm -rf -- "$WORK"
+
+          git clone \
+            --depth 1 \
+            --branch 1.2.1 \
+            https://github.com/libimobiledevice/ifuse.git \
+            "$WORK"
+
+          cd "$WORK"
+
+          TAG_COMMIT="$(
+            git rev-parse --short=7 HEAD
+          )"
+
+          echo "ifuse 1.2.1 tag commit: $TAG_COMMIT"
+
+          [[ "$TAG_COMMIT" == "f7eac74" ]] || {
+            echo "ERROR: unexpected upstream ifuse 1.2.1 tag commit: $TAG_COMMIT" >&2
+            exit 1
+          }
+
+          ./autogen.sh \
+            --prefix=/usr/local
+
+          make \
+            -j"$(nproc)"
+
+          sudo make install
+          sudo ldconfig
+
+          hash -r
+
+          cd "$GITHUB_WORKSPACE"
+
+          ACTIVE_IFUSE="$(
+            command -v ifuse
+          )"
+
+          echo "active ifuse: $ACTIVE_IFUSE"
+
+          [[ "$ACTIVE_IFUSE" == "/usr/local/bin/ifuse" ]] || {
+            echo "ERROR: safe /usr/local ifuse is not active" >&2
+            exit 1
+          }
+
+          /usr/local/bin/ifuse \
+            --version \
+            2>&1 |
+          grep -E             '(^|[^0-9])1\.2\.1([^0-9]|$)'
+
+          PYTHONDONTWRITEBYTECODE=1 \
+          python3 - <<'PYSAFE121'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          source = (
+              Path.cwd()
+              / "src"
+              / "ipod_sync.py"
+          )
+
+          spec = importlib.util.spec_from_file_location(
+              "ipod_sync_safe_ifuse_test",
+              source,
+          )
+
+          if spec is None or spec.loader is None:
+              raise SystemExit(
+                  "ERROR: unable to load ipod_sync.py"
+              )
+
+          module = importlib.util.module_from_spec(
+              spec
+          )
+
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+
+          version = module.require_safe_ifuse()
+
+          if version != (1, 2, 1):
+              raise SystemExit(
+                  "ERROR: expected active ifuse 1.2.1, "
+                  f"got {version}"
+              )
+
+          print(
+              "Ubuntu 26.04 upstream ifuse 1.2.1 "
+              "acceptance: PASS"
+          )
+          PYSAFE121
+
+          echo
+          echo "distro package remains installed:"
+          dpkg-query \
+            -W \
+            -f='ifuse=${Version}\n' \
+            ifuse
+
+          echo
+          echo "active PATH binary:"
+          command -v ifuse
+          ifuse --version 2>&1
+
       - name: Run host-built package lifecycle
         shell: bash
         run: |
