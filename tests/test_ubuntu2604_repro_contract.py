@@ -298,4 +298,40 @@ debian_attest = job_section(ci, "attest-supply-chain")
 require(debian_attest, "ipod-sync-debian11-amd64-")
 require(debian_attest, "uses: actions/attest@")
 
+# ALL_PLATFORM_ATTESTATION_DEPENDENCIES
+debian_attest = job_section(ci, "attest-supply-chain")
+
+needs_block = debian_attest.split(
+    "    needs:\n", 1
+)[1].split(
+    "\n    runs-on:", 1
+)[0]
+
+expected_needs = [
+    "- package-build-audit",
+    "- reproducibility-check",
+    "- package-lifecycle",
+    "- ubuntu-host-compatibility",
+    "- ubuntu2604-reproducibility-check",
+]
+
+actual_needs = [
+    line.strip()
+    for line in needs_block.splitlines()
+    if line.strip()
+]
+
+assert actual_needs == expected_needs, actual_needs
+
+# Ubuntu retains its independent signed attestation.
+ubuntu_attest = job_section(ci, "attest-ubuntu2604")
+
+for dependency in (
+    "- ubuntu-host-compatibility",
+    "- ubuntu2604-reproducibility-check",
+):
+    require(ubuntu_attest, dependency)
+
+print("All-platform attestation dependencies: PASS")
+
 print("Ubuntu reproducibility workflow contract: PASS")
