@@ -125,7 +125,12 @@ jobs:
                   f"ERROR: {version} is still marked Unreleased"
               )
 
-          marker = "Current release:\n\n```text\n"
+          marker = "## Current release\n\n```text\n"
+          if readme.count(marker) != 1:
+              raise SystemExit(
+                  "ERROR: expected exactly one README current-release block"
+              )
+
           start = readme.find(marker)
 
           if start == -1:
