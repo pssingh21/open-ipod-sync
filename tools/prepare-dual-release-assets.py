@@ -70,6 +70,10 @@ def main():
     args = parser.parse_args()
     for value in (args.deb_version, args.public_version):
         require(re.fullmatch(r'[0-9A-Za-z.+~:-]+', value), 'invalid version string')
+    require(
+        args.public_version == args.deb_version.replace('~', '.'),
+        'public version does not match canonical Debian normalization',
+    )
     require(re.fullmatch(r'[0-9a-f]{40}', args.commit), 'invalid commit')
     output = args.output.absolute()
     require(not output.exists() and not output.is_symlink(), 'output already exists')

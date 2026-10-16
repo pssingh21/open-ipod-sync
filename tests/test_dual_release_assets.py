@@ -9,8 +9,8 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "prepare-dual-release-assets.py"
 COMMIT = 'a' * 40
-DEB_VERSION = '0.2.0~alpha.7'
-PUBLIC_VERSION = '0.2.0-alpha.7'
+DEB_VERSION = '0.2.0~alpha7'
+PUBLIC_VERSION = '0.2.0.alpha7'
 
 
 def digest(path):
@@ -45,14 +45,14 @@ def write_checksums(root):
     ))
 
 
-def attempt(root, output):
+def attempt(root, output, public_version=PUBLIC_VERSION):
     return subprocess.run([
         sys.executable, str(SCRIPT),
         '--debian-ci', str(root / 'debian'),
         '--ubuntu-ci', str(root / 'ubuntu'),
         '--output', str(root / output),
         '--deb-version', DEB_VERSION,
-        '--public-version', PUBLIC_VERSION,
+        '--public-version', public_version,
         '--commit', COMMIT,
     ], capture_output=True, text=True)
 
@@ -114,5 +114,20 @@ with tempfile.TemporaryDirectory() as tmp:
     result = attempt(root, 'rejected')
     assert result.returncode != 0 and not (root / 'rejected').exists()
     print('symlinked CI asset rejected: PASS')
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    fresh(root)
+
+    result = attempt(
+        root,
+        'bad-public-version',
+        DEB_VERSION,
+    )
+
+    assert result.returncode != 0
+    assert not (root / 'bad-public-version').exists()
+
+    print('incorrect public version rejected: PASS')
 
 print('dual-platform release asset tests: PASS')

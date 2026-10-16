@@ -330,6 +330,25 @@ for required in (
 ):
     assert required in candidate_ci, required
 
+# The real dual-platform candidate must use exactly
+# the same public filename convention as release.yml.
+assert candidate_ci.count(
+    'public_version="${deb_version//~/.}"'
+) == 1
+
+assert candidate_ci.count(
+    '--public-version "$public_version"'
+) == 1
+
+assert '--public-version "$deb_version"' not in candidate_ci
+
+assert (
+    'PUBLIC_VERSION="${DEB_VERSION//~/.}"'
+    in RELEASE
+)
+
+print("canonical dual-platform version mapping: PASS")
+
 release_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
     RELEASE.split(

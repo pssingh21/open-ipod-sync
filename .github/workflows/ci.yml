@@ -1536,10 +1536,23 @@ jobs:
             test "$(dpkg-deb -f "$package" Architecture)" = amd64
           done
 
+          # Match the established Release workflow convention.
+          # Package: 0.2.0~alpha7
+          # Public:  0.2.0.alpha7
+          public_version="${deb_version//~/.}"
+
+          [[ "$public_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.alpha[0-9]+$ ]] || {
+            echo "ERROR: invalid normalized public version" >&2
+            exit 1
+          }
+
+          echo "Debian version: $deb_version"
+          echo "Public version: $public_version"
+
           candidate="$RUNNER_TEMP/dual-release-candidate"
           test ! -e "$candidate"
 
-          python3 tools/prepare-dual-release-assets.py             --debian-ci ci-debian             --ubuntu-ci ci-ubuntu             --output "$candidate"             --deb-version "$deb_version"             --public-version "$deb_version"             --commit "$GITHUB_SHA"
+          python3 tools/prepare-dual-release-assets.py             --debian-ci ci-debian             --ubuntu-ci ci-ubuntu             --output "$candidate"             --deb-version "$deb_version"             --public-version "$public_version"             --commit "$GITHUB_SHA"
 
           (
             cd "$candidate"
