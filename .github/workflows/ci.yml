@@ -1456,6 +1456,12 @@ jobs:
           python3 tests/test_ubuntu2604_repro_contract.py
           python3 tests/test_ubuntu2604_uutils_toolchain.py
 
+      - name: Verify pinned Ubuntu 26.04 image and APT snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/verify-ubuntu2604-pinned-inputs.sh
+
       - name: Install Ubuntu build dependencies
         shell: bash
         run: |

@@ -132,4 +132,31 @@ assert ci.count(
     "uses: actions/upload-artifact@"
 ) == 2
 
+pinned_script = (
+    ROOT / "tools/verify-ubuntu2604-pinned-inputs.sh"
+).read_text()
+
+assert (
+    "Verify pinned Ubuntu 26.04 image and APT snapshot"
+    in ubuntu
+)
+assert (
+    "bash tools/verify-ubuntu2604-pinned-inputs.sh"
+    in ubuntu
+)
+assert ubuntu.index(
+    "Verify pinned Ubuntu 26.04 image and APT snapshot"
+) < ubuntu.index(
+    "Install Ubuntu build dependencies"
+)
+
+assert (
+    "88a381d5b5eeb2b35d3ad70925a362c37ce569daf43ede89ff818ec20e4d3794"
+    in pinned_script
+)
+assert "20261015T000000Z" in pinned_script
+assert "Snapshot: ${snapshot}" in pinned_script
+assert "resolute-security" in pinned_script
+assert "snapshot[.]ubuntu[.]com" in pinned_script
+
 print("Ubuntu reproducibility workflow contract: PASS")
