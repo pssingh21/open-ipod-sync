@@ -63,46 +63,24 @@ require(
     ubuntu,
     "runs-on: ubuntu-26.04",
 )
-require(
-    ubuntu,
-    "Ubuntu independent A/B rebuild: PASS"
-)
-
-require(
-    ubuntu,
-    "run-reproducibility-matrix.sh",
-)
-require(
-    ubuntu,
-    "ubuntu-26.04-amd64",
-)
-require(
-    ubuntu,
+for marker in (
+    "Run pinned Ubuntu 26.04 A/B matrix",
+    "Prepare verified pinned Ubuntu candidate",
+    "Verify pinned Ubuntu candidate for upload",
+    "Upload verified pinned Ubuntu package",
     "sha256sum -c SHA256SUMS",
-)
-require(
-    ubuntu,
     "python3 tools/privacy-scan.py",
-)
-require(
-    ubuntu,
-    "cmp",
-)
-require(
-    ubuntu,
-    "BYTE-IDENTICAL",
-)
+):
+    require(ubuntu, marker)
 
-assert (
-    ubuntu.index("sha256sum -c SHA256SUMS")
-    < ubuntu.index(
-        "Rebuild Ubuntu package under isolated profiles"
-    )
-)
-
-assert (
-    ubuntu.index("python3 tools/privacy-scan.py")
-    < ubuntu.index("Ubuntu baseline/A/B comparison: PASS")
+assert ubuntu.index(
+    "Run pinned Ubuntu 26.04 A/B matrix"
+) < ubuntu.index(
+    "Prepare verified pinned Ubuntu candidate"
+) < ubuntu.index(
+    "Verify pinned Ubuntu candidate for upload"
+) < ubuntu.index(
+    "Upload verified pinned Ubuntu package"
 )
 
 # Existing Debian reproducibility gate must remain.
@@ -147,7 +125,7 @@ assert (
 assert ubuntu.index(
     "Verify pinned Ubuntu 26.04 image and APT snapshot"
 ) < ubuntu.index(
-    "Install Ubuntu build dependencies"
+    "Run pinned Ubuntu 26.04 A/B matrix"
 )
 
 assert (

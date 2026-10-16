@@ -192,35 +192,50 @@ def extract_ci_job(workflow, job_name):
     return "".join(lines[begin:end])
 
 
-ubuntu_job = extract_ci_job(
+compat_job = extract_ci_job(
     CI, "ubuntu-host-compatibility"
 )
+ubuntu_job = extract_ci_job(
+    CI, "ubuntu2604-reproducibility-check"
+)
+
+if "uses: actions/upload-artifact@" in compat_job:
+    raise SystemExit(
+        "ERROR: compatibility job must not upload Ubuntu package"
+    )
 
 if ubuntu_job.count("uses: actions/upload-artifact@") != 1:
     raise SystemExit(
-        "ERROR: expected one Ubuntu CI artifact upload"
+        "ERROR: expected one verified Ubuntu artifact upload"
     )
 
 for token in (
+    "Run pinned Ubuntu 26.04 A/B matrix",
+    "Prepare verified pinned Ubuntu candidate",
+    "Verify pinned Ubuntu candidate for upload",
+    "Upload verified pinned Ubuntu package",
     "name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}",
-    "if: matrix.os == 'ubuntu-26.04'",
+    "path: ${{ runner.temp }}/ubuntu2604-pinned-candidate/",
     "if-no-files-found: error",
-    "python3 tools/privacy-scan.py ubuntu2604-artifact",
     "sha256sum -c SHA256SUMS",
+    'python3 tools/privacy-scan.py "$candidate"',
+    'test "${#names[@]}" -eq 7',
 ):
-    require(
-        ubuntu_job,
-        token,
-        "Ubuntu 26.04 CI artifact contract",
-    )
+    require(ubuntu_job, token, "verified Ubuntu artifact contract")
 
-if ubuntu_job.index(
-    "python3 tools/privacy-scan.py ubuntu2604-artifact"
-) > ubuntu_job.index(
-    "      - name: Upload Ubuntu 26.04 package artifact"
+if not (
+    ubuntu_job.index("Run pinned Ubuntu 26.04 A/B matrix")
+    < ubuntu_job.index("Prepare verified pinned Ubuntu candidate")
+    < ubuntu_job.index("Verify pinned Ubuntu candidate for upload")
+    < ubuntu_job.index("Upload verified pinned Ubuntu package")
 ):
     raise SystemExit(
-        "ERROR: Ubuntu privacy scan must precede upload"
+        "ERROR: Ubuntu verification and upload order changed"
+    )
+
+if "Download independently built Ubuntu package" in ubuntu_job:
+    raise SystemExit(
+        "ERROR: obsolete Ubuntu baseline download remains"
     )
 
 if RELEASE.count(
