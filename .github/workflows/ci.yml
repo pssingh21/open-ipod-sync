@@ -1434,6 +1434,158 @@ jobs:
 
           echo "tracked source remains unchanged: PASS"
 
+  ubuntu2604-reproducibility-check:
+    name: Ubuntu 26.04 independent reproducibility gate
+    needs: ubuntu-host-compatibility
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify Ubuntu reproducibility CI contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/test_ubuntu2604_repro_contract.py
+
+      - name: Install Ubuntu build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates git bash python3 \
+            build-essential dpkg-dev pkg-config \
+            intltool gettext libglib2.0-dev \
+            libsqlite3-dev libimobiledevice-dev \
+            libplist-dev libxml2-dev zlib1g-dev \
+            libusb-1.0-0-dev file tar xz-utils
+
+          test "$(dpkg --print-architecture)" = amd64
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 26.04
+
+      - name: Download independently built Ubuntu package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/ubuntu2604-baseline
+
+      - name: Verify Ubuntu baseline artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          baseline="$RUNNER_TEMP/ubuntu2604-baseline"
+
+          (
+            cd "$baseline"
+            sha256sum -c SHA256SUMS
+          )
+
+          shopt -s nullglob
+
+          debs=("$baseline"/ipod-sync_*_amd64.deb)
+          sboms=("$baseline"/*.spdx.json)
+
+          [[ "${#debs[@]}" -eq 1 ]]
+          [[ "${#sboms[@]}" -eq 1 ]]
+          [[ -f "$baseline/PROVENANCE.json" ]]
+          [[ -f "$baseline/SHA256SUMS" ]]
+
+          [[ "$(basename "${sboms[0]}")" == \
+             "$(basename "${debs[0]}" .deb).spdx.json" ]]
+
+          mapfile -t files < <(
+            find "$baseline" -maxdepth 1 \
+              -type f -printf '%f\n' | sort
+          )
+
+          [[ "${#files[@]}" -eq 4 ]] || {
+            echo "ERROR: unexpected Ubuntu artifact file set" >&2
+            exit 1
+          }
+
+          echo "Ubuntu baseline integrity: PASS"
+
+      - name: Rebuild Ubuntu package under isolated profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          commit="$(git rev-parse HEAD)"
+          test "$commit" = "$GITHUB_SHA"
+
+          epoch="$(git log -1 --format=%ct)"
+
+          root="$RUNNER_TEMP/ubuntu2604-repro"
+          mkdir -p "$root"
+
+          archive="$root/open-ipod-sync-${commit}-source.tar"
+
+          ./tools/make-source-archive.sh \
+            "$archive" "$commit"
+
+          ./tools/run-reproducibility-matrix.sh \
+            "$archive" \
+            "$commit" \
+            "$epoch" \
+            "$root/matrix" \
+            "ubuntu-26.04-unpinned-apt-index" \
+            "github-hosted-ubuntu-26.04-unpinned-image" \
+            "ubuntu-26.04-amd64"
+
+          echo "Ubuntu independent A/B rebuild: PASS"
+
+      - name: Scan and compare Ubuntu package bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          baseline="$RUNNER_TEMP/ubuntu2604-baseline"
+          matrix="$RUNNER_TEMP/ubuntu2604-repro/matrix"
+
+          python3 tools/privacy-scan.py \
+            "$baseline" \
+            "$matrix/builder-a" \
+            "$matrix/builder-b" \
+            "$matrix/materials"
+
+          shopt -s nullglob
+
+          debs=("$baseline"/ipod-sync_*_amd64.deb)
+          [[ "${#debs[@]}" -eq 1 ]]
+
+          package="$(basename "${debs[0]}")"
+          sbom="${package%.deb}.spdx.json"
+
+          for name in \
+            "$package" \
+            "$sbom" \
+            PROVENANCE.json
+          do
+            cmp \
+              "$baseline/$name" \
+              "$matrix/builder-a/$name"
+
+            cmp \
+              "$baseline/$name" \
+              "$matrix/builder-b/$name"
+
+            echo "$name: BYTE-IDENTICAL"
+          done
+
+          echo "Ubuntu baseline/A/B comparison: PASS"
+
   attest-supply-chain:
     name: GitHub artifact attestations
 

@@ -16,7 +16,11 @@ usage:
     SOURCE_DATE_EPOCH \
     OUTPUT_DIR \
     SNAPSHOT_IDENTITY \
-    BASE_IMAGE_IDENTITY
+    BASE_IMAGE_IDENTITY \
+    [BUILD_ENVIRONMENT]
+
+The optional BUILD_ENVIRONMENT defaults to the pinned Debian 11
+snapshot environment. Ubuntu 26.04 can be selected explicitly.
 
 Builds the same committed source archive twice under deliberately different
 build environments and requires the complete generated supply-chain bundles to
@@ -33,7 +37,7 @@ EOF
     exit 2
 }
 
-[[ $# -eq 6 ]] || usage
+[[ $# -ge 6 && $# -le 7 ]] || usage
 
 ARCHIVE="$1"
 COMMIT="$2"
@@ -41,6 +45,19 @@ SOURCE_EPOCH="$3"
 OUTPUT_ROOT="$4"
 SNAPSHOT_IDENTITY="$5"
 BASE_IMAGE_IDENTITY="$6"
+
+# Preserve the established Debian 11 default.
+BUILD_ENVIRONMENT="${7:-debian-11-amd64-snapshot-20260830T235959Z}"
+
+case "$BUILD_ENVIRONMENT" in
+    debian-11-amd64-snapshot-20260830T235959Z|ubuntu-26.04-amd64)
+        ;;
+    *)
+        echo "ERROR: unsupported build environment" >&2
+        exit 1
+        ;;
+esac
+
 
 [[ -f "$ARCHIVE" ]] || {
     echo "ERROR: source archive missing: $ARCHIVE" >&2
@@ -387,7 +404,7 @@ NO_GIT
         --git-commit "$COMMIT" \
         --source-date-epoch "$SOURCE_EPOCH" \
         --build-environment \
-          "debian-11-amd64-snapshot-20260830T235959Z"
+          "$BUILD_ENVIRONMENT"
 
     (
         cd "$bundle"
