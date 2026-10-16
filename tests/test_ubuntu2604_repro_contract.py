@@ -186,4 +186,46 @@ assert "trusted=yes" not in pinned_script
 assert "allow-unauthenticated" not in pinned_script
 assert "Snapshot: ${snapshot}" not in pinned_script
 
+# PINNED_MATRIX_SECURITY_CONTRACT
+pinned_matrix = (
+    ROOT / "tools/test-ubuntu2604-pinned-matrix.sh"
+).read_text()
+
+require(
+    ubuntu,
+    "Run pinned Ubuntu 26.04 A/B matrix",
+)
+
+require(
+    ubuntu,
+    "bash tools/test-ubuntu2604-pinned-matrix.sh",
+)
+
+assert ubuntu.index(
+    "Verify pinned Ubuntu 26.04 image and APT snapshot"
+) < ubuntu.index(
+    "Run pinned Ubuntu 26.04 A/B matrix"
+)
+
+for token in (
+    "docker.io/library/ubuntu@sha256:",
+    "20261015T000000Z",
+    "APT::Update::Error-Mode=any",
+    "ubuntu-archive-keyring.gpg",
+    "run-reproducibility-matrix.sh",
+    "source=${GITHUB_WORKSPACE},target=/repo,readonly",
+    "source=${CA},target=/tmp/bootstrap-ca.crt,readonly",
+    "python3 tools/privacy-scan.py",
+    "PINNED A/B REPRODUCIBILITY: PASS",
+):
+    require(pinned_matrix, token)
+
+for forbidden in (
+    "Verify-Peer=false",
+    "Verify-Host=false",
+    "allow-unauthenticated",
+    "trusted=yes",
+):
+    assert forbidden not in pinned_matrix
+
 print("Ubuntu reproducibility workflow contract: PASS")

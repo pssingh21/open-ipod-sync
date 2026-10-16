@@ -1462,6 +1462,12 @@ jobs:
           set -euo pipefail
           bash tools/verify-ubuntu2604-pinned-inputs.sh
 
+      - name: Run pinned Ubuntu 26.04 A/B matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/test-ubuntu2604-pinned-matrix.sh
+
       - name: Install Ubuntu build dependencies
         shell: bash
         run: |
