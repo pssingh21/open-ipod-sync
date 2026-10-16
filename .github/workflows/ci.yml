@@ -1454,6 +1454,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/test_ubuntu2604_repro_contract.py
+          python3 tests/test_ubuntu2604_uutils_toolchain.py
 
       - name: Install Ubuntu build dependencies
         shell: bash
