@@ -225,7 +225,174 @@ echo "===== EXPECTED ELF FILES ====="
 SYNC_ELF="$PAYLOAD/usr/lib/ipod-sync/native/sync-envelope"
 LIBGPOD_ELF="$PAYLOAD/usr/lib/ipod-sync/vendor/libgpod/lib/libgpod.so.4.3.2"
 
-for elf in "$SYNC_ELF" "$LIBGPOD_ELF"; do
+IFUSE_POLICY="$(
+  dpkg-deb -f "$DEB" X-Ipod-Sync-Ifuse-Policy 2>/dev/null || true
+)"
+PACKAGE_DEPENDS="$(dpkg-deb -f "$DEB" Depends)"
+IFUSE_ELF="$PAYLOAD/usr/lib/ipod-sync/bin/ifuse"
+IFUSE_MARKER="$PAYLOAD/usr/lib/ipod-sync/ifuse-bundled-required"
+IFUSE_LICENSE="$PAYLOAD/usr/share/doc/ipod-sync/ifuse-COPYING"
+
+AUDIT_ELFS=("$SYNC_ELF" "$LIBGPOD_ELF")
+
+echo "===== EMBEDDED IFUSE POLICY ====="
+
+EXPECTED_WRAPPER_STAMP=""
+EXPECTED_APP_STAMP=""
+
+case "$IFUSE_POLICY" in
+  bundled-1.2.1)
+    EXPECTED_WRAPPER_STAMP="IFUSE_BUNDLED_BUILD=1"
+    EXPECTED_APP_STAMP="BUNDLED_IFUSE_BUILD = True"
+    ;;
+  system)
+    EXPECTED_WRAPPER_STAMP="IFUSE_BUNDLED_BUILD=0"
+    EXPECTED_APP_STAMP="BUNDLED_IFUSE_BUILD = False"
+    ;;
+  "")
+    # Legacy Debian artifacts may lack the policy field.
+    # They must also lack the new embedded-policy stamps.
+    if grep -Eq '^IFUSE_BUNDLED_BUILD=' "$WRAPPER" ||
+       grep -Eq '^BUNDLED_IFUSE_BUILD =' "$APP"; then
+      echo "FAIL: embedded ifuse policy lacks package metadata" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "FAIL: unrecognized embedded ifuse package policy" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "$EXPECTED_WRAPPER_STAMP" ]]; then
+  [[ "$(grep -Ec '^IFUSE_BUNDLED_BUILD=[01]$' "$WRAPPER")" == 1 ]] || {
+    echo "FAIL: invalid number of launcher policy stamps" >&2
+    exit 1
+  }
+
+  [[ "$(grep -Ec '^BUNDLED_IFUSE_BUILD = (True|False)$' "$APP")" == 1 ]] || {
+    echo "FAIL: invalid number of Python policy stamps" >&2
+    exit 1
+  }
+
+  grep -Fxq "$EXPECTED_WRAPPER_STAMP" "$WRAPPER" || {
+    echo "FAIL: embedded ifuse launcher policy mismatch" >&2
+    exit 1
+  }
+
+  grep -Fxq "$EXPECTED_APP_STAMP" "$APP" || {
+    echo "FAIL: embedded ifuse Python policy mismatch" >&2
+    exit 1
+  }
+
+  grep -Fq 'if [[ "$IFUSE_BUNDLED_BUILD" == 1 ]]; then' "$WRAPPER" || {
+    echo "FAIL: mandatory launcher policy guard missing" >&2
+    exit 1
+  }
+
+  grep -Fq 'if BUNDLED_IFUSE_BUILD:' "$APP" || {
+    echo "FAIL: mandatory Python policy guard missing" >&2
+    exit 1
+  }
+fi
+
+echo "embedded ifuse package policy: PASS"
+
+case "$IFUSE_POLICY" in
+  bundled-1.2.1)
+    [[ -f "$IFUSE_ELF" && -x "$IFUSE_ELF" &&
+       ! -L "$IFUSE_ELF" ]] || {
+      echo "FAIL: bundled ifuse missing or non-executable" >&2
+      exit 1
+    }
+
+    [[ -f "$IFUSE_MARKER" && ! -L "$IFUSE_MARKER" ]] || {
+      echo "FAIL: bundled ifuse marker missing" >&2
+      exit 1
+    }
+
+    [[ "$(cat "$IFUSE_MARKER")" == "1.2.1" ]] || {
+      echo "FAIL: bundled ifuse marker is incorrect" >&2
+      exit 1
+    }
+
+    [[ -s "$IFUSE_LICENSE" && ! -L "$IFUSE_LICENSE" ]] || {
+      echo "FAIL: bundled ifuse license missing" >&2
+      exit 1
+    }
+
+    for dep in fuse3 libfuse3-4; do
+      if ! grep -Eq "(^|, )${dep}([ (,]|$)" \
+        <<<"$PACKAGE_DEPENDS"; then
+        echo "FAIL: missing runtime dependency: $dep" >&2
+        exit 1
+      fi
+    done
+
+    if grep -Eq '(^|, )ifuse([ (,]|$)' \
+      <<<"$PACKAGE_DEPENDS"; then
+      echo "FAIL: bundled package depends on system ifuse" >&2
+      exit 1
+    fi
+
+    grep -Fq 'IFUSE_BIN="$PRIVATE_IFUSE"' "$WRAPPER" || {
+      echo "FAIL: private ifuse launcher routing missing" >&2
+      exit 1
+    }
+
+    grep -Fq '"$IFUSE_BIN" "$IPOD_SYNC_MOUNT" -o ro' \
+      "$WRAPPER" || {
+      echo "FAIL: read-only mount is not using selected ifuse" >&2
+      exit 1
+    }
+
+    grep -Fq 'required bundled ifuse 1.2.1 is missing' \
+      "$APP" || {
+      echo "FAIL: Python bundled-ifuse refusal missing" >&2
+      exit 1
+    }
+
+    IFUSE_VERSION="$("$IFUSE_ELF" --version 2>&1)" || {
+      echo "FAIL: bundled ifuse failed to execute" >&2
+      exit 1
+    }
+
+    [[ "$IFUSE_VERSION" == "ifuse 1.2.1" ]] || {
+      echo "FAIL: incorrect bundled ifuse: $IFUSE_VERSION" >&2
+      exit 1
+    }
+
+    "$ROOT/tools/check-elf-hardening.sh" "$IFUSE_ELF"
+
+    AUDIT_ELFS+=("$IFUSE_ELF")
+    echo "bundled ifuse package policy: PASS"
+    ;;
+  system|"")
+    # Empty policy supports older Debian-only packages.
+    # It never permits unexpected private ifuse artifacts.
+    [[ ! -e "$IFUSE_ELF" && ! -L "$IFUSE_ELF" &&
+       ! -e "$IFUSE_MARKER" && ! -L "$IFUSE_MARKER" &&
+       ! -e "$IFUSE_LICENSE" ]] || {
+      echo "FAIL: unexpected private ifuse in system package" >&2
+      exit 1
+    }
+
+    grep -Eq '(^|, )ifuse([ (,]|$)' \
+      <<<"$PACKAGE_DEPENDS" || {
+      echo "FAIL: Debian ifuse dependency missing" >&2
+      exit 1
+    }
+
+    echo "system ifuse package policy: PASS"
+    ;;
+  *)
+    echo "FAIL: unknown ifuse package policy" >&2
+    exit 1
+    ;;
+esac
+
+
+for elf in "${AUDIT_ELFS[@]}"; do
   [[ -f "$elf" ]] || {
     echo "FAIL: expected ELF missing: $elf" >&2
     exit 1
@@ -254,7 +421,7 @@ echo "===== NATIVE ELF HARDENING ====="
 echo
 echo "===== RUNTIME LINKAGE ====="
 
-for elf in "$SYNC_ELF" "$LIBGPOD_ELF"; do
+for elf in "${AUDIT_ELFS[@]}"; do
   echo "--- $(basename "$elf") ---"
 
   linkage="$(ldd "$elf")"

@@ -1,0 +1,13 @@
+Project: ifuse
+Upstream: https://github.com/libimobiledevice/ifuse.git
+Release tag: 1.2.1
+Git commit: f7eac74184ff240c8ba9cf9b413eed75968a462a
+License: LGPL-2.1 (see source COPYING)
+
+Source is captured from the pinned upstream Git commit.
+.tarball-version is added for deterministic non-Git builds.
+
+This is source material for the Ubuntu 26.04
+private bundled-ifuse executable.
+
+No binary from the development host is redistributed.

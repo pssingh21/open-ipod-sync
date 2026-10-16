@@ -134,7 +134,8 @@ apt-get \
     intltool gettext libglib2.0-dev \
     libsqlite3-dev libimobiledevice-dev \
     libplist-dev libxml2-dev zlib1g-dev \
-    libusb-1.0-0-dev file tar xz-utils
+    libusb-1.0-0-dev file tar xz-utils \
+    autoconf automake libtool libfuse3-dev
 
 echo "===== OBSERVED PACKAGE VERSIONS ====="
 

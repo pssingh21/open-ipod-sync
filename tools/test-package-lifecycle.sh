@@ -102,6 +102,27 @@ ACTUAL_VERSION="$(ipod-sync version)"
 echo "version check: PASS"
 
 echo
+echo "===== INSTALLED PRIVATE IFUSE POLICY ====="
+
+IFUSE_PACKAGE_POLICY="$(
+  dpkg-deb -f "$DEB" X-Ipod-Sync-Ifuse-Policy 2>/dev/null || true
+)"
+
+case "$IFUSE_PACKAGE_POLICY" in
+  bundled-1.2.1)
+    PYTHONDONTWRITEBYTECODE=1 \
+      python3 "$(dirname "$0")/../tests/test_installed_private_ifuse.py"
+    ;;
+  system|"")
+    echo "System ifuse package: existing lifecycle contract"
+    ;;
+  *)
+    echo "ERROR: unexpected installed ifuse policy" >&2
+    exit 1
+    ;;
+esac
+
+echo
 echo "===== INSTALLED DOCTOR READ-ONLY PATH ====="
 
 DOCTOR_SOURCE=/mnt/music

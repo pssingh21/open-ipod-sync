@@ -75,6 +75,33 @@ command -v readelf >/dev/null 2>&1 || {
   exit 1
 }
 
+# Only Ubuntu 26.04 uses the bundled private ifuse.
+BUNDLE_IFUSE=0
+
+if [[ -r /etc/os-release ]]; then
+  . /etc/os-release
+  if [[ "${ID:-}" == ubuntu &&
+        "${VERSION_ID:-}" == "26.04" ]]; then
+    BUNDLE_IFUSE=1
+  fi
+fi
+
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  for cmd in autoreconf autoconf automake aclocal autoheader libtoolize; do
+    command -v "$cmd" >/dev/null || {
+      echo "ERROR: missing ifuse build tool: $cmd" >&2
+      exit 1
+    }
+  done
+
+  for module in fuse3 libimobiledevice-1.0 libplist-2.0; do
+    pkg-config --exists "$module" || {
+      echo "ERROR: missing ifuse development module: $module" >&2
+      exit 1
+    }
+  done
+fi
+
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || echo "WARNING: only Debian 11 amd64 has been validated so far; building for $ARCH"
 VER="0.2.0~alpha8"
@@ -153,6 +180,56 @@ while IFS= read -r -d '' so; do
   strip --strip-unneeded "$so"
 done < <(find "$LIBP/lib" -type f -name 'libgpod.so*' -print0)
 
+# Build pinned ifuse 1.2.1 privately for Ubuntu 26.04.
+IFUSE_PACKAGE_ELF="$BUILD/usr/lib/ipod-sync/bin/ifuse"
+
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  IFUSE_SOURCE="$ROOT/third_party/ifuse-1.2.1-source"
+  IFUSE_WORK="$ROOT/build/ifuse-1.2.1-build"
+
+  test -f "$IFUSE_SOURCE/src/ifuse.c"
+  test "$(cat "$IFUSE_SOURCE/.tarball-version")" = "1.2.1"
+
+  mkdir -p "$IFUSE_WORK" "$(dirname "$IFUSE_PACKAGE_ELF")"
+
+  tar -C "$IFUSE_SOURCE" -cf - . |
+    tar -C "$IFUSE_WORK" -xf -
+
+  (
+    cd "$IFUSE_WORK"
+
+    autoreconf --install --force
+
+    COMMON_MAP_FLAGS="-ffile-prefix-map=$ROOT=/usr/src/ipod-sync -fdebug-prefix-map=$ROOT=/usr/src/ipod-sync -fmacro-prefix-map=$ROOT=/usr/src/ipod-sync"
+
+    export CFLAGS="-O2 -g0 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fno-common $COMMON_MAP_FLAGS"
+    export LDFLAGS="-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -pie"
+
+    ./configure --prefix=/usr
+
+    make -C src -j"${IPOD_SYNC_BUILD_JOBS:-2}"
+  )
+
+  install -m0755 \
+    "$IFUSE_WORK/src/ifuse" \
+    "$IFUSE_PACKAGE_ELF"
+
+  strip --strip-unneeded "$IFUSE_PACKAGE_ELF"
+
+  "$ROOT/tools/check-elf-hardening.sh" "$IFUSE_PACKAGE_ELF"
+
+  printf '%s\n' "1.2.1" > \
+    "$BUILD/usr/lib/ipod-sync/ifuse-bundled-required"
+
+  install -m0644 \
+    "$IFUSE_SOURCE/COPYING" \
+    "$BUILD/usr/share/doc/ipod-sync/ifuse-COPYING"
+
+  "$IFUSE_PACKAGE_ELF" --version
+
+  echo "Private ifuse build and ELF hardening: PASS"
+fi
+
 install -m0755 "$ROOT/src/ipod_sync.py" "$BUILD/usr/lib/ipod-sync/ipod_sync.py"
 install -m0644 "$ROOT/vendor/ipodctl/cdb.py" "$BUILD/usr/lib/ipod-sync/ipodctl/cdb.py"
 install -m0644 "$ROOT/vendor/ipodctl/__init__.py" "$BUILD/usr/lib/ipod-sync/ipodctl/__init__.py"
@@ -201,18 +278,40 @@ CONFIG=/etc/ipod-sync/config.env
 : "${IPOD_SYNC_SOURCE:=/mnt/music}"
 : "${IPOD_SYNC_MOUNT:=$HOME/ipod}"
 APP=/usr/lib/ipod-sync/ipod_sync.py
+IFUSE_BUNDLED_BUILD=0
+IFUSE_POLICY_MARKER=/usr/lib/ipod-sync/ifuse-bundled-required
+PRIVATE_IFUSE=/usr/lib/ipod-sync/bin/ifuse
+IFUSE_BIN=""
 
 mount_info() { findmnt -n -M "$IPOD_SYNC_MOUNT" -o FSTYPE,OPTIONS 2>/dev/null || true; }
 
 require_safe_ifuse() {
-  command -v ifuse >/dev/null 2>&1 || {
-    echo "REFUSED: required command not found: ifuse" >&2
-    exit 2
-  }
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 ]]; then
+    if [[ ! -f "$IFUSE_POLICY_MARKER" ||
+          -L "$IFUSE_POLICY_MARKER" ||
+          "$(<"$IFUSE_POLICY_MARKER")" != "1.2.1" ]]; then
+      echo "REFUSED: bundled ifuse policy marker missing or invalid" >&2
+      exit 2
+    fi
+  fi
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 || -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+    if [[ ! -f "$PRIVATE_IFUSE" || -L "$PRIVATE_IFUSE" ||
+          ! -x "$PRIVATE_IFUSE" ]]; then
+      echo "REFUSED: bundled ifuse 1.2.1 is missing or invalid" >&2
+      exit 2
+    fi
+    IFUSE_BIN="$PRIVATE_IFUSE"
+  else
+    IFUSE_BIN="$(command -v ifuse || true)"
+    if [[ -z "$IFUSE_BIN" ]]; then
+      echo "REFUSED: required command not found: ifuse" >&2
+      exit 2
+    fi
+  fi
 
   local output version="" active_ifuse package_version
 
-  if ! output="$(ifuse --version 2>&1)"; then
+  if ! output="$("$IFUSE_BIN" --version 2>&1)"; then
     echo "REFUSED: unable to determine ifuse version" >&2
     exit 2
   fi
@@ -220,9 +319,7 @@ require_safe_ifuse() {
   if [[ "$output" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
     version="${BASH_REMATCH[1]}"
   else
-    active_ifuse="$(
-      command -v ifuse
-    )"
+    active_ifuse="$IFUSE_BIN"
 
     package_version=""
 
@@ -250,6 +347,13 @@ require_safe_ifuse() {
     fi
   fi
 
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 || -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+    if [[ "$version" != "1.2.1" ]]; then
+      echo "REFUSED: bundled ifuse must report exactly 1.2.1" >&2
+      exit 2
+    fi
+  fi
+
   if [[ "$version" == "1.2.0" ]]; then
     echo "REFUSED: unsafe ifuse version detected: 1.2.0" >&2
     echo "ifuse 1.2.0 has an upstream-confirmed data-corruption bug." >&2
@@ -271,7 +375,7 @@ ensure_ro_mount() {
   mapfile -t ids < <(idevice_id -l)
   [[ "${#ids[@]}" -eq 1 ]] || { echo "REFUSED: expected exactly one connected iOS device; found ${#ids[@]}" >&2; exit 2; }
   idevicepair validate >/dev/null
-  ifuse "$IPOD_SYNC_MOUNT" -o ro
+  "$IFUSE_BIN" "$IPOD_SYNC_MOUNT" -o ro
   local info fstype opts
   info="$(mount_info)"; fstype="${info%% *}"; opts="${info#* }"
   [[ "$fstype" == "fuse.ifuse" && ",$opts," == *,ro,* ]] || { echo "ERROR: failed to establish read-only ifuse mount" >&2; exit 2; }
@@ -316,6 +420,45 @@ USAGE
     exit 2 ;;
 esac
 WRAP
+python3 - "$BUILD/usr/bin/ipod-sync" \
+  "$BUILD/usr/lib/ipod-sync/ipod_sync.py" \
+  "$BUNDLE_IFUSE" <<'STAMP_IFUSE_POLICY'
+from pathlib import Path
+import sys
+
+launcher_path = Path(sys.argv[1])
+app_path = Path(sys.argv[2])
+bundled = sys.argv[3] == "1"
+
+changes = (
+    (launcher_path,
+     "IFUSE_BUNDLED_BUILD=0",
+     "IFUSE_BUNDLED_BUILD=1"),
+    (app_path,
+     "BUNDLED_IFUSE_BUILD = False",
+     "BUNDLED_IFUSE_BUILD = True"),
+)
+
+prepared = []
+for path, old, new in changes:
+    source = path.read_text()
+    if source.count(old) != 1:
+        raise SystemExit(
+            f"ERROR: invalid package policy stamp: {path}"
+        )
+    prepared.append((
+        path,
+        source.replace(old, new, 1) if bundled else source,
+    ))
+
+for path, content in prepared:
+    path.write_text(content)
+
+print(
+    "Packaged ifuse policy:",
+    "mandatory bundled 1.2.1" if bundled else "system runtime",
+)
+STAMP_IFUSE_POLICY
 chmod 0755 "$BUILD/usr/bin/ipod-sync"
 
 cat > "$BUILD/DEBIAN/preinst" <<'PREINST'
@@ -411,6 +554,26 @@ Architecture: any
 Description: Temporary shlib dependency analysis package
 SHLIBCONTROL
 
+IFUSE_SHLIB_ARGS=()
+
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  mkdir -p "$SHLIBDEPS_PKG/usr/lib/ipod-sync/bin"
+
+  cp "$IFUSE_PACKAGE_ELF" \
+    "$SHLIBDEPS_PKG/usr/lib/ipod-sync/bin/ifuse"
+
+  cmp -s \
+    "$IFUSE_PACKAGE_ELF" \
+    "$SHLIBDEPS_PKG/usr/lib/ipod-sync/bin/ifuse" || {
+      echo "ERROR: shlibdeps private ifuse copy differs" >&2
+      exit 1
+    }
+
+  IFUSE_SHLIB_ARGS=(
+    -e"debian/ipod-sync/usr/lib/ipod-sync/bin/ifuse"
+  )
+fi
+
 SHLIB_OUTPUT="$(
   cd "$SHLIBDEPS_ROOT"
 
@@ -418,7 +581,8 @@ SHLIB_OUTPUT="$(
     dpkg-shlibdeps \
       -O \
       -e"debian/ipod-sync/usr/lib/ipod-sync/native/sync-envelope" \
-      -e"debian/ipod-sync$RUNTIME_PREFIX/lib/libgpod.so.4.3.2"
+      -e"debian/ipod-sync$RUNTIME_PREFIX/lib/libgpod.so.4.3.2" \
+      "${IFUSE_SHLIB_ARGS[@]}"
 )"
 
 mapfile -t SHLIB_DEP_LINES < <(
@@ -444,6 +608,15 @@ echo "$SHLIB_DEPENDS"
 
 rm -rf "$SHLIBDEPS_ROOT"
 
+# Debian uses safe system ifuse; Ubuntu uses bundled 1.2.1.
+IFUSE_RUNTIME_DEP="ifuse, "
+IFUSE_PACKAGE_POLICY="system"
+
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  IFUSE_RUNTIME_DEP="fuse3, "
+  IFUSE_PACKAGE_POLICY="bundled-1.2.1"
+fi
+
 cat > "$BUILD/DEBIAN/control" <<CONTROL
 Package: ipod-sync
 Version: $VER
@@ -451,7 +624,8 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: ipod-sync project
-Depends: python3, ifuse, libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, $SHLIB_DEPENDS, libusb-1.0-0
+X-Ipod-Sync-Ifuse-Policy: $IFUSE_PACKAGE_POLICY
+Depends: python3, ${IFUSE_RUNTIME_DEP}libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, $SHLIB_DEPENDS, libusb-1.0-0
 Description: Experimental ADD-only music sync for legacy iPod touch devices
  Streams music from a dedicated kernel-read-only source mount to a legacy iPod,
  commits Apple music databases inside an iTunes-style sync envelope, and
@@ -472,8 +646,14 @@ if [[ -f "$ROOT/third_party/libgpod-patched-source/debian/copyright" ]]; then
 fi
 
 find "$BUILD" -type d -exec chmod 0755 {} +
-find "$BUILD" -type f ! -path '*/DEBIAN/*' ! -path '*/usr/bin/*' ! -name sync-envelope -exec chmod 0644 {} +
+find "$BUILD" -type f ! -path '*/DEBIAN/*' ! -path '*/usr/bin/*' ! -name sync-envelope ! -path '*/usr/lib/ipod-sync/bin/ifuse' -exec chmod 0644 {} +
 chmod 0755 "$BUILD/usr/bin/ipod-sync" "$BUILD/usr/lib/ipod-sync/ipod_sync.py" "$BUILD/usr/lib/ipod-sync/native/sync-envelope" "$BUILD/DEBIAN/preinst" "$BUILD/DEBIAN/postinst"
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  chmod 0755 "$IFUSE_PACKAGE_ELF"
+  test -x "$IFUSE_PACKAGE_ELF"
+  test -f "$BUILD/usr/lib/ipod-sync/ifuse-bundled-required"
+fi
+
 # Python bytecode embeds build paths and is unnecessary in this package.
 find "$BUILD" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUILD" -type f -name '*.pyc' -delete

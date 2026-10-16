@@ -57,6 +57,7 @@ VERSION = "0.2.0-alpha.8"
 
 HOME = Path.home()
 PROJECT = Path("/usr/lib/ipod-sync")
+BUNDLED_IFUSE_BUILD = False
 STATE_ROOT = Path(os.environ.get("IPOD_SYNC_STATE_DIR", str(HOME / ".local/share/ipod-sync")))
 RUN_ROOT = STATE_ROOT / "stream-sync-runs"
 SYNC_STATE = STATE_ROOT / "stream-sync-state.json"
@@ -168,6 +169,50 @@ def run(
 
 
 def require_cmd(name: str) -> str:
+    if name == "ifuse":
+        marker = PROJECT / "ifuse-bundled-required"
+        if BUNDLED_IFUSE_BUILD:
+            try:
+                marker_valid = (
+                    marker.is_file()
+                    and not marker.is_symlink()
+                    and marker.read_text(
+                        encoding="ascii"
+                    ).strip() == "1.2.1"
+                )
+            except (OSError, UnicodeError):
+                marker_valid = False
+
+            if not marker_valid:
+                raise SyncError(
+                    "required bundled ifuse policy marker "
+                    "is missing or invalid"
+                )
+
+        if (
+            BUNDLED_IFUSE_BUILD
+            or marker.exists()
+            or marker.is_symlink()
+        ):
+            binary = PROJECT / "bin" / "ifuse"
+            try:
+                info = binary.lstat()
+            except OSError as exc:
+                raise SyncError(
+                    "required bundled ifuse 1.2.1 is missing"
+                ) from exc
+
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or not os.access(binary, os.X_OK)
+                or binary.is_symlink()
+            ):
+                raise SyncError(
+                    "required bundled ifuse is not a regular "
+                    "executable file"
+                )
+            return str(binary)
+
     p = shutil.which(name)
     if not p:
         raise SyncError(f"required command not found: {name}")
@@ -418,7 +463,30 @@ def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
 
 def require_safe_ifuse(binary: str | None = None) -> tuple[int, int, int]:
     """Reject upstream ifuse 1.2.0 before trusting any device filesystem data."""
+    marker = PROJECT / "ifuse-bundled-required"
+    bundled_required = (
+        BUNDLED_IFUSE_BUILD
+        or marker.exists()
+        or marker.is_symlink()
+    )
+
+    if bundled_required:
+        selected = require_cmd("ifuse")
+        if (
+            binary is not None
+            and os.path.abspath(binary) != selected
+        ):
+            raise SyncError(
+                "bundled ifuse required; refusing alternate executable"
+            )
+        binary = selected
+
     version = ifuse_version(binary)
+
+    if bundled_required and version != (1, 2, 1):
+        raise SyncError(
+            "bundled ifuse must report exactly version 1.2.1"
+        )
 
     if version == (1, 2, 0):
         raise SyncError(
