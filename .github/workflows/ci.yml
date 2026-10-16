@@ -1750,6 +1750,8 @@ jobs:
 
             # Allow for brief GitHub API indexing delay.
             for attempt in 1 2 3 4 5 6 7 8; do
+              echo "Attestation verification attempt ${attempt}/8 for $(basename "$file")"
+
               if gh attestation verify "$file" \
                 --repo "$GITHUB_REPOSITORY" \
                 --source-ref "refs/heads/main" \
