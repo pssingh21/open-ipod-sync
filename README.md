@@ -78,7 +78,87 @@ For Ubuntu 26.04 amd64, use its separately built package:
 sudo apt install ./ipod-sync-ubuntu2604_0.2.0.alpha8_amd64.deb
 ```
 
-On Ubuntu 26.04, verify that the active `ifuse` runtime is safe before connecting or mounting an iPod. The known-unsafe upstream `ifuse` 1.2.0 is rejected; use the project's documented host preparation procedure for the pinned 1.2.1 runtime.
+### Ubuntu 26.04 ifuse remediation
+
+**Important:** Ubuntu 26.04 may install `ifuse` 1.2.0, which has a
+known upstream data-corruption bug. Installing the `ipod-sync` `.deb`
+does not automatically replace that system runtime.
+
+If you run:
+
+```bash
+ipod-sync mount-ro
+```
+
+and receive:
+
+```text
+REFUSED: unsafe ifuse version detected: 1.2.0
+```
+
+do not bypass this protection or continue using the unsafe mount.
+
+**Fix:** Use the project's `prepare-host.sh` script to install the
+pinned, safe upstream `ifuse` 1.2.1 runtime.
+
+First ensure any existing `ifuse` iPod mount has been unmounted.
+The preparation script refuses to replace `ifuse` while one is active.
+
+If you installed only the GitHub release `.deb` and do not have
+a repository checkout, download the matching release source:
+
+```bash
+git clone --depth 1 --branch v0.2.0-alpha.8 \
+  https://github.com/pssingh21/open-ipod-sync.git
+cd open-ipod-sync
+```
+
+If you already have a trusted project checkout, use that checkout
+instead of cloning it again.
+
+From the project root, run:
+
+```bash
+sudo ./tools/prepare-host.sh
+```
+
+The script installs required host dependencies, detects unsafe
+`ifuse` 1.2.0, verifies the pinned upstream 1.2.1 release commit,
+builds it, and installs the safe executable under `/usr/local/bin`.
+
+Verify the active executable:
+
+```bash
+hash -r
+command -v ifuse
+ifuse --version
+```
+
+Expected active executable:
+
+```text
+/usr/local/bin/ifuse
+```
+
+Expected version: **1.2.1**.
+
+The Ubuntu distribution package may still report version `1.2.0-2`.
+This is expected because the distribution package remains installed
+for dependency resolution, while the safe `/usr/local/bin/ifuse`
+takes precedence.
+
+Once the safe runtime is active, continue with normal configuration
+and mount the iPod read-only:
+
+```bash
+ipod-sync mount-ro
+ipod-sync doctor
+```
+
+Do not proceed with planning or synchronization until the runtime
+and safety checks succeed.
+
+
 
 Verify the installation:
 
@@ -334,6 +414,8 @@ Unmount an existing iPod mount first:
 ```bash
 ipod-sync unmount
 ```
+
+For remediation instructions, including the required `prepare-host.sh` command, see [Ubuntu 26.04 ifuse remediation](#ubuntu-2604-ifuse-remediation).
 
 Upstream references:
 
