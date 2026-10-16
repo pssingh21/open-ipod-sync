@@ -504,217 +504,78 @@ bytes have been explained and the gate is green again.
 <!-- CONSUMER_RELEASE_RUNBOOK_BEGIN -->
 ## Independent consumer verification contract
 
-The release pipeline publishes an exact eight-asset contract. A release is
-incomplete if any expected asset is absent or if any unexpected asset is
-present.
-
-Expected assets:
-
-```text
-CI-SHA256SUMS
-PROVENANCE.json
-SHA256SUMS
-BUILD-MATERIALS.json
-TOOLCHAIN.json
-open-ipod-sync-<GITHUB_SHA>-source.tar
-ipod-sync_<public-version>_amd64.deb
-ipod-sync_<public-version>_amd64.spdx.json
-```
+The new release workflow has an **exact fourteen-asset contract**: two `.deb`
+packages, two SPDX SBOMs, four Debian evidence files, four Ubuntu evidence
+files, a byte-identical deterministic source archive and `SHA256SUMS`.
+See the README's complete filenames. The existing alpha.7 release remains an
+historical eight-asset release and is not modified.
 
 ### CI evidence entering the release workflow
 
-The audited Debian 11 CI artifact contains exactly seven files:
-
-```text
-PROVENANCE.json
-SHA256SUMS
-BUILD-MATERIALS.json
-TOOLCHAIN.json
-open-ipod-sync-<GITHUB_SHA>-source.tar
-ipod-sync_<debian-version>_amd64.deb
-ipod-sync_<debian-version>_amd64.spdx.json
-```
-
-Its `SHA256SUMS` covers the six payload files other than the checksum manifest
-itself.
-
-The reproducibility job independently proves that the canonical public:
-
-```text
-BUILD-MATERIALS.json
-TOOLCHAIN.json
-open-ipod-sync-<GITHUB_SHA>-source.tar
-```
-
-are byte-identical to the corresponding source/material/toolchain evidence
-observed by the isolated A/B reproducibility builders.
-
-The internal files:
-
-```text
-builder-a.json
-builder-b.json
-toolchain-a.json
-toolchain-b.json
-```
-
-remain CI-only evidence and must never be published as release assets.
+Both CI bundles contain exactly seven files: one package, one SPDX, source
+archive, provenance, build materials, toolchain and `SHA256SUMS`. Both must be
+sourced from the same successful `main` CI run and every original CI subject
+must have a valid GitHub artifact attestation. Each package additionally
+requires its own SPDX attestation. The Ubuntu bundle must match the pinned
+Ubuntu build identity and snapshot. Public filenames are normalized while
+the original bytes and evidence identities are preserved.
 
 ### Release preflight requirements
 
-Before a release can be assembled:
-
-1. The exact main-branch CI run for `GITHUB_SHA` must have passed all required
-   CI jobs.
-2. The CI artifact must contain exactly the seven expected files.
-3. Its checksum manifest must verify.
-4. The deterministic source archive filename must contain `GITHUB_SHA`.
-5. The source archive's embedded Git commit must equal `GITHUB_SHA`.
-6. `BUILD-MATERIALS.json` must identify `GITHUB_SHA`.
-7. The package, SPDX, provenance, CI checksum manifest, source archive,
-   build-material manifest, and toolchain manifest must all pass GitHub
-   attestation verification.
-8. The Debian package must also pass its SPDX attestation verification.
-
-Do not bypass these checks to publish a release.
+The workflow requires its exact main CI SHA and all required jobs to succeed,
+checks tag and release absence, source identity, immutable-release settings,
+CI checksums, provenance, package metadata, privacy and signed attestations.
+It assembles and offline-verifies an exact fourteen-asset candidate. No tag or
+public release is created during preflight.
 
 ### Building the immutable public bundle
 
-The release workflow copies the audited CI bytes into the public bundle.
-
-Only the Debian and SPDX filenames are normalized from Debian version syntax to
-the public release form; for example:
-
-```text
-0.2.0~alpha7 -> 0.2.0.alpha7
-```
-
-The bytes themselves are not modified.
-
-`CI-SHA256SUMS` preserves the original CI artifact identities.
-
-The public `SHA256SUMS` covers exactly these seven payloads:
-
-```text
-CI-SHA256SUMS
-PROVENANCE.json
-BUILD-MATERIALS.json
-TOOLCHAIN.json
-open-ipod-sync-<GITHUB_SHA>-source.tar
-ipod-sync_<public-version>_amd64.deb
-ipod-sync_<public-version>_amd64.spdx.json
-```
-
-`SHA256SUMS` itself is the eighth release asset and is therefore not
-self-hashed.
+The protected publish job retrieves the already-verified preflight candidate,
+extracts `RELEASE-NOTES.md` outside the fourteen-asset release directory,
+rechecks current `main`, tag absence, all fourteen assets, checksums and privacy,
+then creates the annotated tag and publishes the exact assets through the
+existing Release workflow. The public `SHA256SUMS` covers exactly thirteen
+payload files and is not itself CI-attested.
 
 ### Post-publication verification
 
-The release `verify` job downloads the GitHub Release assets again into a fresh
-directory. Verification is performed against those freshly downloaded bytes,
-not against the pre-publication workspace.
-
-The job performs:
-
-1. privacy scanning of the published release;
-2. public checksum validation;
-3. GitHub release and per-asset verification;
-4. CI artifact-attestation verification;
-5. package SPDX-attestation verification;
-6. the independent consumer verifier:
+A separate read-only job downloads all public assets afresh and runs the
+independent consumer verifier (not preflight workspace copies):
 
 ```bash
-python3 tools/verify-release.py \
+python3 tools/verify-dual-release-github.py \
   published \
   --expected-commit "$GITHUB_SHA" \
-  --expected-repository \
-  "https://github.com/$GITHUB_REPOSITORY" \
-  --github \
   --repo "$GITHUB_REPOSITORY" \
   --tag "$TAG"
 ```
 
-This is intentional dogfooding: the release pipeline uses the same verifier
-that an external consumer can run.
+This verifies the exact fourteen-file set, SHA256SUMS, both platforms' identity
+and build evidence, immutable release status, tag-to-commit binding, each GitHub
+release asset digest, 13 CI subject attestations and both SPDX attestations.
+The historical eight-asset consumer verifier is `tools/verify-release.py`.
 
 ### Consumer verification procedure
 
-A consumer with a checkout of the repository can verify a release using:
-
-```bash
-REPO="pssingh21/open-ipod-sync"
-TAG="v0.2.0-alpha.7"
-DIR="$PWD/release-verify-$TAG"
-
-rm -rf "$DIR"
-mkdir -p "$DIR"
-
-gh release download "$TAG" \
-  --repo "$REPO" \
-  --dir "$DIR"
-```
-
-Offline verification:
-
-```bash
-python3 tools/verify-release.py \
-  "$DIR" \
-  --expected-repository \
-  "https://github.com/$REPO"
-```
-
-Online GitHub authenticity verification:
-
-```bash
-python3 tools/verify-release.py \
-  "$DIR" \
-  --expected-repository \
-  "https://github.com/$REPO" \
-  --github \
-  --repo "$REPO" \
-  --tag "$TAG"
-```
-
-If the expected release commit is already known independently, consumers should
-also provide:
-
-```text
---expected-commit <40-character-commit>
-```
+Consumers can download a *published* dual-platform release with `gh release
+download` and independently run `tools/verify-dual-release.py` offline with a
+known expected commit, or `tools/verify-dual-release-github.py` online with the
+repository and tag. Both tools are provided by the release's matching checkout.
+Do not use the new contract to retrospectively judge historical alpha.7.
 
 ### Failure handling
 
-Treat every verifier failure as release-integrity failure until investigated.
-
-Do not instruct consumers to ignore:
-
-- checksum mismatches;
-- missing or extra release assets;
-- source archive commit/timestamp/prefix mismatches;
-- `BUILD-MATERIALS.json` source hash or commit mismatches;
-- toolchain policy mismatches;
-- package/provenance/SPDX mismatches;
-- tag-to-commit mismatches;
-- mutable GitHub releases;
-- GitHub release-asset verification failures;
-- artifact-attestation failures.
-
-If a published immutable release is found to be invalid, publish a corrected
-new version/tag through the normal release process. Do not mutate the existing
-immutable release.
+Missing, extra, unsigned or digest-mismatched assets; provenance/SPDX or build
+material identity mismatches; mutable releases; and unexpected tags are hard
+failures. Do not bypass verification or mutate an existing immutable release.
+Publish a corrected new version/tag through normal review if necessary.
 
 ### Trust-boundary statement
 
-Independent consumer verification does not require the original CI workspace,
-an attached iPod, or access to the user's music source.
-
-It verifies release identity and reproducibility evidence while preserving the
-existing build-isolation boundary. The build remains accurately described as
-reproducible, network-isolated, material-recorded, and tool-resolution
-confined, with the documented filesystem-read boundary.
-
-The NAS/source-library read-only invariant is unchanged and is not involved in
-release verification.
+Reproducibility evidence is not a claim of a complete filesystem-read sandbox.
+All release verification is independent of the original CI workspace and does
+not read or modify an iPod, NAS or source-library music. The NAS/source-library read-only invariant is unchanged: no operation may
+write, modify, rename or delete source data on the NAS.
 <!-- CONSUMER_RELEASE_RUNBOOK_END -->
 
 <!-- REPOSITORY_RELEASE_POLICY_BEGIN -->

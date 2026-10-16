@@ -287,7 +287,49 @@ assert attest.index(
     "Independently verify Ubuntu GitHub attestations"
 )
 
-assert attest.count("uses: actions/attest@") == 1
+# Ubuntu requires exactly two independently defined
+# attestation steps: supply-chain provenance and SPDX SBOM.
+assert attest.count("uses: actions/attest@") == 2, (
+    "Ubuntu must have exactly two signing steps"
+)
+
+provenance_name = "Attest verified Ubuntu pinned bundle"
+sbom_name = "Attest Ubuntu package with SPDX SBOM"
+verification_name = "Independently verify Ubuntu GitHub attestations"
+
+for name in (
+    provenance_name,
+    sbom_name,
+    verification_name,
+):
+    assert attest.count("      - name: " + name) == 1, name
+
+# Enforce signing order before independent verification.
+assert (
+    attest.index(provenance_name)
+    < attest.index(sbom_name)
+    < attest.index(verification_name)
+)
+
+# Bind SPDX signing to the verified package and SBOM
+# output, rather than an unchecked input or wildcard.
+assert attest.count("id: bundle") == 1
+
+sbom_step = attest.split(
+    "      - name: " + sbom_name, 1
+)[1].split(
+    "      - name: " + verification_name, 1
+)[0]
+
+assert sbom_step.count("uses: actions/attest@") == 1
+
+for required in (
+    "subject-path: ${{ steps.bundle.outputs.deb }}",
+    "sbom-path: ${{ steps.bundle.outputs.sbom }}",
+):
+    assert required in sbom_step, required
+
+print("Ubuntu dual-attestation contract: PASS")
 assert attest.count("uses: actions/download-artifact@") == 1
 assert "uses: actions/upload-artifact@" not in attest
 assert "gh release create" not in attest

@@ -1,3 +1,4 @@
+import subprocess
 #!/usr/bin/env python3
 
 from pathlib import Path
@@ -226,6 +227,7 @@ for token in (
     "package-lifecycle:",
     "ubuntu-host-compatibility:",
     "ubuntu2604-reproducibility-check:",
+    "dual-platform-release-candidate-check:",
     "attest-supply-chain:",
     "attest-ubuntu2604:",
 ):
@@ -246,7 +248,7 @@ for token in (
     assert token in RELEASE, token
 
 
-# Preserve the exact eight-job top-level CI contract.
+# Preserve the exact nine-job top-level CI contract.
 # The Ubuntu reproducibility gate is a distinct mandatory CI job.
 ci_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
@@ -263,10 +265,90 @@ assert ci_jobs == [
     "package-lifecycle",
     "ubuntu-host-compatibility",
     "ubuntu2604-reproducibility-check",
+    "dual-platform-release-candidate-check",
     "attest-supply-chain",
     "attest-ubuntu2604",
 ], ci_jobs
 
+
+# Real multi-platform CI candidate must be independently
+# assembled and checked without adding a publish channel.
+# Extract the CI job using exact YAML indentation.
+# This avoids fragile escaped-newline string matching.
+def extract_ci_job(workflow, job_name):
+    lines = workflow.splitlines(keepends=True)
+    heading = f"  {job_name}:"
+
+    matches = [
+        i for i, line in enumerate(lines)
+        if line.rstrip() == heading
+    ]
+
+    assert len(matches) == 1, (
+        f"Expected exactly one CI job: {job_name}; "
+        f"found {len(matches)}"
+    )
+
+    begin = matches[0]
+    end = len(lines)
+
+    for i in range(begin + 1, len(lines)):
+        line = lines[i]
+
+        # Top-level jobs use exactly two spaces.
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.strip().endswith(":")
+        ):
+            end = i
+            break
+
+    return "".join(lines[begin:end])
+
+
+candidate_ci = extract_ci_job(
+    CI, "dual-platform-release-candidate-check"
+)
+
+assert candidate_ci.count(
+    "uses: actions/download-artifact@"
+) == 2
+assert "uses: actions/upload-artifact@" not in candidate_ci
+
+for required in (
+    "- package-build-audit",
+    "- reproducibility-check",
+    "- ubuntu2604-reproducibility-check",
+    "persist-credentials: false",
+    "tools/prepare-dual-release-assets.py",
+    "--debian-ci ci-debian",
+    "--ubuntu-ci ci-ubuntu",
+    "--commit",
+    "sha256sum -c SHA256SUMS",
+    "python3 tools/privacy-scan.py",
+    "Exact 14-file release candidate: PASS",
+):
+    assert required in candidate_ci, required
+
+# The real dual-platform candidate must use exactly
+# the same public filename convention as release.yml.
+assert candidate_ci.count(
+    'public_version="${deb_version//\~/.}"'
+) == 1
+
+assert candidate_ci.count(
+    '--public-version "$public_version"'
+) == 1
+
+assert '--public-version "$deb_version"' not in candidate_ci
+
+assert (
+    'PUBLIC_VERSION="${DEB_VERSION//\~/.}"'
+    in RELEASE
+)
+
+print("canonical dual-platform version mapping: PASS")
 
 release_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
@@ -282,6 +364,45 @@ assert release_jobs == [
     "verify",
 ], release_jobs
 
+
+# RELEASE_VERSION_RUNTIME_CONTRACT
+# Execute the actual Bash assignment from both workflows.
+# Static substring checks alone cannot detect tilde expansion.
+for label, workflow, input_var, output_var in (
+    ("CI", CI, "deb_version", "public_version"),
+    ("Release", RELEASE, "DEB_VERSION", "PUBLIC_VERSION"),
+):
+    prefix = output_var + "="
+
+    assignments = [
+        line.strip()
+        for line in workflow.splitlines()
+        if line.strip().startswith(prefix)
+    ]
+
+    assert len(assignments) == 1, (
+        f"{label}: expected exactly one version assignment"
+    )
+
+    script = chr(10).join((
+        f'{input_var}="0.2.0~alpha7"',
+        assignments[0],
+        f'printf "%s" "${{{output_var}}}"',
+        "",
+    ))
+
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout == "0.2.0.alpha7", (
+        f"{label}: incorrect normalization: {result.stdout!r}"
+    )
+
+    print(f"{label} public version normalization: PASS")
 
 print(
     "repository policy contract tests: PASS"

@@ -70,46 +70,19 @@ for token in (
     )
 
 
-# Consumer-visible release evidence.
+# Consumer-visible release evidence and independent verifier.
 for token in (
-    'CI_SOURCE="ci-bundle/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    "ci-bundle/BUILD-MATERIALS.json",
-    "ci-bundle/TOOLCHAIN.json",
-    'RELEASE_SOURCE="open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    "release/BUILD-MATERIALS.json",
-    "release/TOOLCHAIN.json",
-    '"release/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    'f"open-ipod-sync-{commit}-source.tar"',
-    'SOURCE="published/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    'MATERIALS="published/BUILD-MATERIALS.json"',
-    'TOOLCHAIN="published/TOOLCHAIN.json"',
+    'tools/prepare-dual-release-assets.py',
+    'tools/verify-dual-release.py',
+    'tools/verify-dual-release-github.py',
+    'Release preflight 14-asset candidate: PASS',
+    'Approved exact 14-asset publication boundary: PASS',
+    'gh release create "$TAG" release/*',
+    '--notes-file "$RUNNER_TEMP/RELEASE-NOTES.md"',
+    'Run independent dual-platform consumer verifier',
+    'independent dual-platform consumer verification: PASS',
 ):
-    require(
-        RELEASE,
-        token,
-        "release workflow",
-    )
-
-
-# The same externally usable verifier must be exercised by release CI.
-for token in (
-    "Run independent consumer release verifier",
-    "python3 tools/verify-release.py",
-    "--expected-commit",
-    '"$GITHUB_SHA"',
-    "--expected-repository",
-    '"https://github.com/$GITHUB_REPOSITORY"',
-    "--github",
-    '--repo "$GITHUB_REPOSITORY"',
-    '--tag "$TAG"',
-    "independent consumer verification: PASS",
-):
-    require(
-        RELEASE,
-        token,
-        "release consumer-verification step",
-    )
-
+    require(RELEASE, token, 'dual-platform release workflow')
 
 # Consumer verifier schemas / trust layers.
 for token in (
@@ -247,23 +220,32 @@ if RELEASE.count(
     )
 
 
-# The release workflow must still be fail-closed on an exact asset set.
+# The release must reject missing, extra or duplicate remote assets.
 for token in (
     '"CI-SHA256SUMS"',
     '"PROVENANCE.json"',
     '"SHA256SUMS"',
     '"BUILD-MATERIALS.json"',
     '"TOOLCHAIN.json"',
+    '"UBUNTU2604-CI-SHA256SUMS"',
+    '"UBUNTU2604-PROVENANCE.json"',
+    '"UBUNTU2604-BUILD-MATERIALS.json"',
+    '"UBUNTU2604-TOOLCHAIN.json"',
     'f"open-ipod-sync-{commit}-source.tar"',
     'f"ipod-sync_{public_version}_amd64.deb"',
     'f"ipod-sync_{public_version}_amd64.spdx.json"',
+    'f"ipod-sync-ubuntu2604_{public_version}_amd64.deb"',
+    'f"ipod-sync-ubuntu2604_{public_version}_amd64.spdx.json"',
+    'len(remote_names) != 14',
 ):
-    require(
-        RELEASE,
-        token,
-        "exact release asset contract",
-    )
+    require(RELEASE, token, 'exact dual-platform asset set')
 
+assert RELEASE.count('gh release create "$TAG"') == 1
+assert RELEASE.count('uses: actions/upload-artifact@') == 1
+assert 'gh release upload' not in RELEASE
+assert RELEASE.index('Verify exact dual-platform release candidate') < RELEASE.index('Publish prerelease')
+assert RELEASE.index('Revalidate publication boundary') < RELEASE.index('Publish prerelease')
+assert RELEASE.index('Download published assets fresh') < RELEASE.index('Run independent dual-platform consumer verifier')
 
 # Reproducibility checksum manifests intentionally have different scopes.
 #
@@ -294,55 +276,272 @@ if (
         "full-scope SHA256SUMS as a core payload"
     )
 
-# Consumer-facing documentation is part of the release contract.
+# Consumer-facing documentation remains part of the contract.
 for token in (
-    "## Independently verify a release",
-    "Every new release publishes enough evidence",
-    "exactly these eight assets",
-    "BUILD-MATERIALS.json",
-    "TOOLCHAIN.json",
-    "open-ipod-sync-<40-character-commit>-source.tar",
-    "python3 tools/verify-release.py",
-    "--expected-commit",
-    "--expected-repository",
-    "--github",
-    "--repo",
-    "--tag",
-    "offline operation",
-    "never reads or modifies the music source directory",
+    '## Independently verify a release',
+    'exactly fourteen assets',
+    'UBUNTU2604-PROVENANCE.json',
+    'UBUNTU2604-BUILD-MATERIALS.json',
+    'ipod-sync-ubuntu2604_<public-version>_amd64.deb',
+    'tools/verify-dual-release.py',
+    'tools/verify-dual-release-github.py',
+    'eight-asset',
+    'read-only source invariant',
 ):
-    require(
-        README,
-        token,
-        "README consumer verification documentation",
+    require(README, token, 'consumer README')
+for token in (
+    '## Independent consumer verification contract',
+    'exact fourteen-asset contract',
+    'CI evidence entering the release workflow',
+    'Post-publication verification',
+    'Failure handling',
+    'immutable release',
+    'Trust-boundary statement',
+    'NAS/source-library read-only invariant is unchanged',
+):
+    require(RUNBOOK, token, 'release runbook')
+for forbidden in ('fully hermetic build', 'fully-hermetic build'):
+    assert forbidden not in README and forbidden not in RUNBOOK
+
+# Dual-platform release gate contract.
+# Identify the required CI job set without depending
+# on YAML or embedded Python indentation.
+import re
+
+matches = re.findall(
+    r"required\s*=\s*\{([^{}]*)\}\s*"
+    r"missing\s*=\s*required\s*-\s*set\(jobs\)",
+    RELEASE,
+    flags=re.DOTALL,
+)
+
+assert len(matches) == 1, (
+    "Expected exactly one release CI required-job set"
+)
+
+actual = re.findall(r'"([^"\n]+)"', matches[0])
+
+expected = {
+    "Public source sanity — Python 3.9",
+    "Debian 11 package build + audit",
+    "Debian 11 reproducibility gate",
+    "Debian 11 package lifecycle",
+    "Ubuntu host compatibility — ubuntu-24.04",
+    "Ubuntu host compatibility — ubuntu-26.04",
+    "Ubuntu 26.04 independent reproducibility gate",
+    "Dual-platform release candidate smoke test",
+    "GitHub artifact attestations",
+    "GitHub Ubuntu 26.04 pinned artifact attestation",
+}
+
+assert len(actual) == len(expected)
+assert set(actual) == expected, (
+    f"Release CI gate mismatch: {actual}"
+)
+
+for check in (
+    'if run["headSha"] != expected:',
+    'if run["conclusion"] != "success":',
+    'if jobs[name] != "success"',
+):
+    assert check in RELEASE, (
+        f"Missing fail-closed release check: {check}"
     )
 
-for token in (
-    "## Independent consumer verification contract",
-    "exact eight-asset contract",
-    "CI evidence entering the release workflow",
-    "Post-publication verification",
-    "independent consumer verifier",
-    "Failure handling",
-    "immutable release",
-    "Trust-boundary statement",
-    "NAS/source-library read-only invariant is unchanged",
-):
-    require(
-        RUNBOOK,
-        token,
-        "release runbook consumer verification documentation",
-    )
+# UBUNTU_SPDX_ATTESTATION_CONTRACT
+ubuntu_attestation_job = CI.split(
+    "  attest-ubuntu2604:", 1
+)[1]
 
+for token in (
+    "id: bundle",
+    "Attest Ubuntu package with SPDX SBOM",
+    "subject-path: ${{ steps.bundle.outputs.deb }}",
+    "sbom-path: ${{ steps.bundle.outputs.sbom }}",
+    "Ubuntu SPDX SBOM attestation: PASS",
+    "--predicate-type https://spdx.dev/Document/v2.3",
+):
+    assert token in ubuntu_attestation_job, token
+
+ubuntu_release_step = RELEASE.split(
+    "      - name: Verify Ubuntu 26.04 CI bundle and attestations",
+    1,
+)[1].split(
+    "      - name: Prepare immutable release bundle",
+    1,
+)[0]
+
+for token in (
+    "Signed Ubuntu SPDX evidence: PASS",
+    "--predicate-type https://spdx.dev/Document/v2.3",
+    '--source-digest "$GITHUB_SHA"',
+    "--signer-workflow",
+    "--deny-self-hosted-runners",
+):
+    assert token in ubuntu_release_step, token
+
+print("Ubuntu SPDX attestation parity contract: PASS")
+
+# DUAL_PLATFORM_RELEASE_PREFLIGHT_CONTRACT
+dual_preflight_heading = (
+    "      - name: Verify exact dual-platform release candidate"
+)
+legacy_preparation_heading = (
+    "      - name: Prepare immutable release bundle"
+)
+ubuntu_verification_heading = (
+    "      - name: Verify Ubuntu 26.04 CI bundle and attestations"
+)
+
+for heading in (
+    ubuntu_verification_heading,
+    dual_preflight_heading,
+    legacy_preparation_heading,
+):
+    assert RELEASE.splitlines().count(heading) == 1, heading
+
+assert (
+    RELEASE.index(ubuntu_verification_heading)
+    < RELEASE.index(dual_preflight_heading)
+    < RELEASE.index(legacy_preparation_heading)
+)
+
+dual_release_preflight = RELEASE.split(
+    dual_preflight_heading, 1
+)[1].split(
+    legacy_preparation_heading, 1
+)[0]
+
+for token in (
+    "set -euo pipefail",
+    "tools/prepare-dual-release-assets.py",
+    "--debian-ci ci-bundle",
+    "--ubuntu-ci ci-ubuntu2604",
+    '--output "$candidate"',
+    '--deb-version "$DEB_VERSION"',
+    '--public-version "$PUBLIC_VERSION"',
+    '--commit "$GITHUB_SHA"',
+    "tools/verify-dual-release.py",
+    '--expected-commit "$GITHUB_SHA"',
+    "sha256sum -c SHA256SUMS",
+    'test "${#candidate_files[@]}" -eq 14',
+    'python3 tools/privacy-scan.py "$candidate"',
+    "Release preflight 14-asset candidate: PASS",
+):
+    assert token in dual_release_preflight, token
+
+assert (
+    dual_release_preflight.index("tools/prepare-dual-release-assets.py")
+    < dual_release_preflight.index("tools/verify-dual-release.py")
+    < dual_release_preflight.index("sha256sum -c SHA256SUMS")
+    < dual_release_preflight.index("python3 tools/privacy-scan.py")
+)
+
+# No publication, tag creation, or artifact-upload action
+# may be introduced into the candidate-validation step.
 for forbidden in (
-    "fully hermetic build",
-    "fully-hermetic build",
+    "gh release create",
+    "git push",
+    "actions/upload-artifact@",
+    "gh release upload",
 ):
-    if forbidden in README or forbidden in RUNBOOK:
-        raise SystemExit(
-            "ERROR: documentation contains unsupported "
-            f"hermeticity claim: {forbidden}"
-        )
+    assert forbidden not in dual_release_preflight, forbidden
+
+print("Dual-platform release preflight contract: PASS")
+
+# UBUNTU_RELEASE_INPUT_CONTRACT
+
+# Match complete YAML step-heading lines rather than relying
+# on embedded newline escape sequences.
+release_lines = RELEASE.splitlines()
+
+ubuntu_steps = (
+    "Download exact Ubuntu 26.04 CI bundle",
+    "Verify Ubuntu 26.04 CI bundle and attestations",
+    "Prepare immutable release bundle",
+)
+
+positions = []
+
+for name in ubuntu_steps:
+    heading = f"      - name: {name}"
+
+    matches = [
+        index
+        for index, line in enumerate(release_lines)
+        if line == heading
+    ]
+
+    assert len(matches) == 1, (
+        f"Expected exactly one release step: {name}; "
+        f"found {len(matches)}"
+    )
+
+    positions.append(matches[0])
+
+assert positions == sorted(positions)
+assert len(set(positions)) == len(positions)
+
+download = "\n".join(
+    release_lines[positions[0]:positions[1]]
+)
+
+verify = "\n".join(
+    release_lines[positions[1]:positions[2]]
+)
+
+# Download must refer to the exact selected main CI run.
+for token in (
+    'RUN_ID: ${{ steps.ci.outputs.run_id }}',
+    'gh run download "$RUN_ID"',
+    '--name "ipod-sync-ubuntu2604-amd64-$GITHUB_SHA"',
+    '--dir ci-ubuntu2604',
+):
+    assert token in download, (
+        f"Ubuntu artifact download contract missing: {token}"
+    )
+
+# Verify both metadata linkage and security checks
+# before preparing any public release assets.
+for token in (
+    'bundle="ci-ubuntu2604"',
+    'root = Path("ci-ubuntu2604")',
+    '"PROVENANCE.json"',
+    '"BUILD-MATERIALS.json"',
+    '"TOOLCHAIN.json"',
+    'sha256sum -c SHA256SUMS',
+    'git get-tar-commit-id',
+    'ci-bundle/$source',
+    'open-ipod-sync-build-materials-v1',
+    'open-ipod-sync-provenance-v1',
+    'ubuntu-26.04-snapshot-20261015T000000Z',
+    'python3 tools/privacy-scan.py "$bundle"',
+    'gh attestation verify "$subject"',
+    '--source-ref',
+    '--source-digest',
+    '--signer-workflow',
+    '--deny-self-hosted-runners',
+    'Ubuntu signed CI bundle verification: PASS',
+):
+    assert token in verify, (
+        f"Ubuntu artifact verification missing: {token}"
+    )
+
+assert verify.index(
+    'sha256sum -c SHA256SUMS'
+) < verify.index(
+    'gh attestation verify "$subject"'
+)
+
+assert verify.index(
+    'python3 tools/privacy-scan.py "$bundle"'
+) < verify.index(
+    'gh attestation verify "$subject"'
+)
+
+print("Ubuntu release input verification contract: PASS")
+
+print("dual-platform release CI gate contract: PASS")
 
 print("consumer verification documentation: PASS")
 
@@ -350,6 +549,6 @@ print("canonical consumer evidence in CI: PASS")
 print("canonical consumer evidence in release: PASS")
 print("internal A/B evidence remains unpublished: PASS")
 print("audited CI and release artifact channels: PASS")
-print("exact eight-asset release contract: PASS")
+print("exact fourteen-asset release contract: PASS")
 print("release workflow dogfoods consumer verifier: PASS")
 print("consumer release contract tests: PASS")

@@ -71,7 +71,7 @@ jobs:
           }
 
           DEB_VERSION="${RELEASE_VERSION/-alpha./~alpha}"
-          PUBLIC_VERSION="${DEB_VERSION//~/.}"
+          PUBLIC_VERSION="${DEB_VERSION//\~/.}"
           TAG="v${RELEASE_VERSION}"
 
           echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
@@ -270,7 +270,10 @@ jobs:
               "Debian 11 package lifecycle",
               "Ubuntu host compatibility — ubuntu-24.04",
               "Ubuntu host compatibility — ubuntu-26.04",
+              "Ubuntu 26.04 independent reproducibility gate",
+              "Dual-platform release candidate smoke test",
               "GitHub artifact attestations",
+              "GitHub Ubuntu 26.04 pinned artifact attestation",
           }
 
           missing = required - set(jobs)
@@ -502,148 +505,384 @@ jobs:
 
           echo "CI checksums + attestations + verification evidence: PASS"
 
-      - name: Prepare immutable release bundle
+      - name: Download exact Ubuntu 26.04 CI bundle
         shell: bash
         env:
-          RELEASE_VERSION: ${{ steps.vars.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ci-ubuntu2604
+
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "ipod-sync-ubuntu2604-amd64-$GITHUB_SHA" \
+            --dir ci-ubuntu2604
+
+          echo "Ubuntu bundle downloaded from exact main CI run"
+
+      - name: Verify Ubuntu 26.04 CI bundle and attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
+        run: |
+          set -euo pipefail
+
+          bundle="ci-ubuntu2604"
+          deb="ipod-sync_${EXPECTED_DEB_VERSION}_amd64.deb"
+          spdx="${deb%.deb}.spdx.json"
+          source="open-ipod-sync-${GITHUB_SHA}-source.tar"
+
+          echo "===== EXACT UBUNTU ARTIFACT FILE SET ====="
+
+          expected=(
+            "$deb"
+            "$spdx"
+            "$source"
+            PROVENANCE.json
+            BUILD-MATERIALS.json
+            TOOLCHAIN.json
+            SHA256SUMS
+          )
+
+          mapfile -t expected_sorted < <(
+            printf '%s\n' "${expected[@]}" | LC_ALL=C sort
+          )
+
+          mapfile -t actual < <(
+            find "$bundle" -mindepth 1 -maxdepth 1 \
+              -printf '%f\n' | LC_ALL=C sort
+          )
+
+          diff -u \
+            <(printf '%s\n' "${expected_sorted[@]}") \
+            <(printf '%s\n' "${actual[@]}")
+
+          for name in "${expected[@]}"; do
+            test -f "$bundle/$name"
+            test ! -L "$bundle/$name"
+          done
+
+          echo "Ubuntu seven-file contract: PASS"
+
+          echo "===== CHECKSUM VERIFICATION ====="
+
+          (
+            cd "$bundle"
+
+            mapfile -t hashed < <(
+              awk '{print $2}' SHA256SUMS |
+              LC_ALL=C sort
+            )
+
+            mapfile -t expected_hashes < <(
+              printf '%s\n' \
+                "$deb" "$spdx" "$source" \
+                PROVENANCE.json \
+                BUILD-MATERIALS.json \
+                TOOLCHAIN.json |
+              LC_ALL=C sort
+            )
+
+            diff -u \
+              <(printf '%s\n' "${expected_hashes[@]}") \
+              <(printf '%s\n' "${hashed[@]}")
+
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "Ubuntu checksum integrity: PASS"
+
+          echo "===== VERIFY PACKAGE AND SOURCE IDENTITY ====="
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Package
+          )" = ipod-sync
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Version
+          )" = "$EXPECTED_DEB_VERSION"
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Architecture
+          )" = amd64
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$bundle/$source"
+          )"
+
+          test "$embedded_commit" = "$GITHUB_SHA"
+
+          # Debian and Ubuntu must use identical source bytes.
+          cmp \
+            "$bundle/$source" \
+            "ci-bundle/$source"
+
+          echo "Package version and common source: PASS"
+
+          echo "===== VERIFY SUPPLY-CHAIN METADATA ====="
+
+          python3 - "$GITHUB_SHA" "$EXPECTED_DEB_VERSION" <<'PY_META'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          commit, version = sys.argv[1:]
+          root = Path("ci-ubuntu2604")
+
+          deb = f"ipod-sync_{version}_amd64.deb"
+          spdx = deb[:-4] + ".spdx.json"
+          source = f"open-ipod-sync-{commit}-source.tar"
+
+          def digest(name):
+              return hashlib.sha256(
+                  (root / name).read_bytes()
+              ).hexdigest()
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit("ERROR: " + message)
+
+          provenance = json.loads(
+              (root / "PROVENANCE.json").read_text()
+          )
+          sbom = json.loads((root / spdx).read_text())
+          materials = json.loads(
+              (root / "BUILD-MATERIALS.json").read_text()
+          )
+          toolchain = json.loads(
+              (root / "TOOLCHAIN.json").read_text()
+          )
+
+          require(
+              provenance["schema"] ==
+              "open-ipod-sync-provenance-v1",
+              "provenance schema",
+          )
+          require(
+              provenance["source"]["git_commit"] == commit,
+              "provenance source commit",
+          )
+          require(
+              provenance["subject"] == {
+                  "name": deb,
+                  "sha256": digest(deb),
+              },
+              "provenance package subject",
+          )
+          require(
+              provenance["package"]["version"] == version
+              and provenance["package"]["architecture"] == "amd64",
+              "provenance package version and architecture",
+          )
+          require(
+              provenance["build"]["environment"]
+              == "ubuntu-26.04-amd64",
+              "Ubuntu build environment",
+          )
+          require(
+              provenance["sbom"]["name"] == spdx
+              and provenance["sbom"]["sha256"] == digest(spdx),
+              "provenance SPDX linkage",
+          )
+
+          require(
+              sbom["spdxVersion"] == "SPDX-2.3",
+              "SPDX document version",
+          )
+          packages = [
+              item for item in sbom["packages"]
+              if item.get("SPDXID") ==
+              "SPDXRef-Package-ipod-sync"
+          ]
+          require(len(packages) == 1, "SPDX root package")
+          package = packages[0]
+          require(
+              package["packageFileName"] == deb
+              and package["versionInfo"] == version,
+              "SPDX package identity",
+          )
+          require(
+              any(
+                  item.get("algorithm") == "SHA256"
+                  and item.get("checksumValue") == digest(deb)
+                  for item in package["checksums"]
+              ),
+              "SPDX package digest",
+          )
+
+          require(
+              materials["schema"] ==
+              "open-ipod-sync-build-materials-v1",
+              "build materials schema",
+          )
+          require(
+              materials["source"]["commit"] == commit
+              and materials["source"]["archive_sha256"]
+              == digest(source),
+              "build materials source identity",
+          )
+          env = materials["declared_environment"]
+          require(
+              env["base_image_identity"] ==
+              "docker.io/library/ubuntu@sha256:"
+              "88a381d5b5eeb2b35d3ad70925a362c37ce569daf43ede89ff818ec20e4d3794",
+              "pinned Ubuntu image identity",
+          )
+          require(
+              env["snapshot_identity"] ==
+              "ubuntu-26.04-snapshot-20261015T000000Z",
+              "pinned Ubuntu snapshot identity",
+          )
+          require(
+              toolchain["schema"] ==
+              "open-ipod-sync-toolchain-view-v1",
+              "toolchain schema",
+          )
+          require(
+              materials["observed_environment"]["architecture"]
+              == "amd64",
+              "observed architecture",
+          )
+
+          print("Ubuntu provenance linkage: PASS")
+          print("Ubuntu SPDX linkage: PASS")
+          print("Pinned build materials: PASS")
+          print("Toolchain evidence: PASS")
+          PY_META
+
+          echo "===== PRIVACY BOUNDARY ====="
+
+          python3 tools/privacy-scan.py "$bundle"
+
+          echo "===== VERIFY GITHUB ATTESTATIONS ====="
+
+          shopt -s nullglob
+          subjects=("$bundle"/*)
+          test "${#subjects[@]}" -eq 7
+
+          for subject in "${subjects[@]}"; do
+            gh attestation verify "$subject" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-ref "refs/heads/main" \
+              --source-digest "$GITHUB_SHA" \
+              --signer-workflow \
+                "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+              --deny-self-hosted-runners \
+              >/dev/null
+
+            echo "Verified: $(basename "$subject")"
+          done
+
+          gh attestation verify "$bundle/$deb" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --source-ref "refs/heads/main" \
+            --source-digest "$GITHUB_SHA" \
+            --signer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo "Signed Ubuntu SPDX evidence: PASS"
+
+          echo "Ubuntu signed CI bundle verification: PASS"
+
+      - name: Verify exact dual-platform release candidate
+        shell: bash
+        env:
           DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
           PUBLIC_VERSION: ${{ steps.vars.outputs.public_version }}
         run: |
           set -euo pipefail
 
-          mkdir -p release
+          echo "===== ASSEMBLE BOTH VERIFIED CI BUNDLES ====="
 
-          CI_DEB="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.deb"
-          CI_SPDX="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.spdx.json"
-          CI_SOURCE="ci-bundle/open-ipod-sync-${GITHUB_SHA}-source.tar"
+          candidate="$RUNNER_TEMP/dual-release-preflight"
 
-          RELEASE_DEB="ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          RELEASE_SPDX="ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-          RELEASE_SOURCE="open-ipod-sync-${GITHUB_SHA}-source.tar"
+          test ! -e "$candidate"
 
-          [[ -f "$CI_DEB" ]] || {
-            echo "ERROR: exact CI Debian artifact missing: $CI_DEB" >&2
-            exit 1
-          }
+          python3 tools/prepare-dual-release-assets.py \
+            --debian-ci ci-bundle \
+            --ubuntu-ci ci-ubuntu2604 \
+            --output "$candidate" \
+            --deb-version "$DEB_VERSION" \
+            --public-version "$PUBLIC_VERSION" \
+            --commit "$GITHUB_SHA"
 
-          [[ -f "$CI_SPDX" ]] || {
-            echo "ERROR: exact CI SPDX artifact missing: $CI_SPDX" >&2
-            exit 1
-          }
+          echo "===== VERIFY EXACT CANDIDATE ====="
 
-          [[ -f "$CI_SOURCE" ]] || {
-            echo "ERROR: exact CI source archive missing: $CI_SOURCE" >&2
-            exit 1
-          }
+          python3 tools/verify-dual-release.py \
+            "$candidate" \
+            --expected-commit "$GITHUB_SHA"
 
-          [[ -f ci-bundle/BUILD-MATERIALS.json ]] || {
-            echo "ERROR: BUILD-MATERIALS.json missing from CI bundle" >&2
-            exit 1
-          }
-
-          [[ -f ci-bundle/TOOLCHAIN.json ]] || {
-            echo "ERROR: TOOLCHAIN.json missing from CI bundle" >&2
-            exit 1
-          }
-
-          cp "$CI_DEB" \
-             "release/$RELEASE_DEB"
-
-          cp "$CI_SPDX" \
-             "release/$RELEASE_SPDX"
-
-          cp ci-bundle/PROVENANCE.json \
-             release/PROVENANCE.json
-
-          cp ci-bundle/SHA256SUMS \
-             release/CI-SHA256SUMS
-
-          cp "$CI_SOURCE" \
-             "release/$RELEASE_SOURCE"
-
-          cp ci-bundle/BUILD-MATERIALS.json \
-             release/BUILD-MATERIALS.json
-
-          cp ci-bundle/TOOLCHAIN.json \
-             release/TOOLCHAIN.json
-
-          cmp -s "$CI_DEB" \
-            "release/$RELEASE_DEB"
-
-          cmp -s "$CI_SPDX" \
-            "release/$RELEASE_SPDX"
-
-          cmp -s ci-bundle/PROVENANCE.json \
-            release/PROVENANCE.json
-
-          cmp -s ci-bundle/SHA256SUMS \
-            release/CI-SHA256SUMS
-
-          cmp -s "$CI_SOURCE" \
-            "release/$RELEASE_SOURCE"
-
-          cmp -s ci-bundle/BUILD-MATERIALS.json \
-            release/BUILD-MATERIALS.json
-
-          cmp -s ci-bundle/TOOLCHAIN.json \
-            release/TOOLCHAIN.json
+          echo "===== VERIFY CHECKSUMS ====="
 
           (
-            cd release
-
-            sha256sum \
-              "$RELEASE_DEB" \
-              "$RELEASE_SPDX" \
-              PROVENANCE.json \
-              CI-SHA256SUMS \
-              "$RELEASE_SOURCE" \
-              BUILD-MATERIALS.json \
-              TOOLCHAIN.json \
-              > SHA256SUMS
-
+            cd "$candidate"
             sha256sum -c SHA256SUMS
           )
 
-          python3 - "$RELEASE_VERSION" <<'PY'
-          from pathlib import Path
-          import sys
+          echo "===== ENFORCE FILE COUNT ====="
 
-          version = sys.argv[1]
-          text = Path("CHANGELOG.md").read_text()
-
-          marker = f"## {version} — "
-          start = text.find(marker)
-
-          if start == -1:
-              raise SystemExit(
-                  f"ERROR: changelog entry missing for {version}"
-              )
-
-          next_heading = text.find("\n## ", start + len(marker))
-
-          if next_heading == -1:
-              section = text[start:].rstrip()
-          else:
-              section = text[start:next_heading].rstrip()
-
-          if "— Unreleased" in section.splitlines()[0]:
-              raise SystemExit(
-                  f"ERROR: {version} changelog is still Unreleased"
-              )
-
-          Path("release/RELEASE-NOTES.md").write_text(
-              section + "\n"
+          mapfile -t candidate_files < <(
+            find "$candidate" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              -printf '%f\n' |
+            LC_ALL=C sort
           )
 
-          print("release notes extraction: PASS")
-          PY
+          test "${#candidate_files[@]}" -eq 14
 
-          echo "prepared release bundle:"
-          find release \
-            -maxdepth 1 \
-            -type f \
-            -printf '%f\n' |
-          sort
+          echo "===== PRIVACY SCAN ====="
+
+          python3 tools/privacy-scan.py "$candidate"
+
+          echo "Release preflight 14-asset candidate: PASS"
+          echo "Dual-platform offline verification: PASS"
+          echo "No release publication performed"
+
+      - name: Prepare immutable release bundle
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          candidate="$RUNNER_TEMP/dual-release-preflight"
+          test -d "$candidate"
+          test ! -L "$candidate"
+          test ! -e release
+          cp -a "$candidate" release
+
+          # Verify exact candidate bytes before notes enter the transfer bundle.
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          python3 tools/privacy-scan.py release
+
+          python3 - "$RELEASE_VERSION" <<'PY_NOTES'
+          from pathlib import Path
+          import sys
+          version = sys.argv[1]
+          text = Path("CHANGELOG.md").read_text()
+          marker = f"## {version} — "
+          start = text.find(marker)
+          if start == -1:
+              raise SystemExit("ERROR: release changelog entry missing")
+          next_heading = text.find("\n## ", start + len(marker))
+          section = text[start:next_heading].rstrip() if next_heading != -1 else text[start:].rstrip()
+          if "— Unreleased" in section.splitlines()[0]:
+              raise SystemExit("ERROR: release is marked Unreleased")
+          Path("release/RELEASE-NOTES.md").write_text(section + "\n")
+          print("Release notes extracted without changing 14 public assets: PASS")
+          PY_NOTES
+
+          test "$(find release -mindepth 1 -maxdepth 1 | wc -l)" -eq 15
+          echo "Exact 14 public assets + separate release notes: PASS"
 
       - name: Scan verified release bundle privacy boundary
         shell: bash
@@ -693,44 +932,35 @@ jobs:
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
             echo "ERROR: publication ref is not main" >&2
             exit 1
           }
-
           git fetch --no-tags origin main
-
-          MAIN_SHA="$(git rev-parse origin/main)"
-
-          [[ "$MAIN_SHA" == "$GITHUB_SHA" ]] || {
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
             echo "ERROR: main moved after release dispatch" >&2
-            echo "dispatch SHA: $GITHUB_SHA" >&2
-            echo "current main: $MAIN_SHA" >&2
             exit 1
           }
-
-          if git ls-remote --exit-code \
-              --tags origin \
-              "refs/tags/$TAG" >/dev/null 2>&1
-          then
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "ERROR: tag appeared after preflight: $TAG" >&2
             exit 1
           fi
-
-          if gh release view "$TAG" \
-              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
-          then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "ERROR: release appeared after preflight: $TAG" >&2
             exit 1
           fi
 
-          (
-            cd release
-            sha256sum -c SHA256SUMS
-          )
+          # Notes were transferred with the preflight artifact, not published.
+          test -f release/RELEASE-NOTES.md
+          test ! -L release/RELEASE-NOTES.md
+          test ! -e "$RUNNER_TEMP/RELEASE-NOTES.md"
+          mv release/RELEASE-NOTES.md "$RUNNER_TEMP/RELEASE-NOTES.md"
+          test -s "$RUNNER_TEMP/RELEASE-NOTES.md"
 
-          echo "publication boundary: PASS"
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          python3 tools/privacy-scan.py release
+          echo "Approved exact 14-asset publication boundary: PASS"
 
       - name: Scan publication privacy boundary
         shell: bash
@@ -787,31 +1017,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
         run: |
           set -euo pipefail
-
-          DEB="release/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          SPDX="release/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-
-          gh release create "$TAG" \
-            "$DEB" \
-            "$SPDX" \
-            release/PROVENANCE.json \
-            release/CI-SHA256SUMS \
-            "release/open-ipod-sync-${GITHUB_SHA}-source.tar" \
-            release/BUILD-MATERIALS.json \
-            release/TOOLCHAIN.json \
-            release/SHA256SUMS \
+          # The preceding step fails unless release/ is exactly the verified
+          # 14-file set. The shell glob expands those exact asset files.
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          test -s "$RUNNER_TEMP/RELEASE-NOTES.md"
+          gh release create "$TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --prerelease \
             --latest=false \
             --fail-on-no-commits \
             --title "open-ipod-sync $RELEASE_VERSION" \
-            --notes-file release/RELEASE-NOTES.md
-
-          echo "release publication requested: PASS"
+            --notes-file "$RUNNER_TEMP/RELEASE-NOTES.md"
+          echo "Dual-platform 14-asset publication requested: PASS"
 
       - name: Verify published release flags
         shell: bash
@@ -859,21 +1080,21 @@ jobs:
               "SHA256SUMS",
               "BUILD-MATERIALS.json",
               "TOOLCHAIN.json",
+              "UBUNTU2604-CI-SHA256SUMS",
+              "UBUNTU2604-PROVENANCE.json",
+              "UBUNTU2604-BUILD-MATERIALS.json",
+              "UBUNTU2604-TOOLCHAIN.json",
               f"open-ipod-sync-{commit}-source.tar",
               f"ipod-sync_{public_version}_amd64.deb",
               f"ipod-sync_{public_version}_amd64.spdx.json",
+              f"ipod-sync-ubuntu2604_{public_version}_amd64.deb",
+              f"ipod-sync-ubuntu2604_{public_version}_amd64.spdx.json",
           }
-
-          actual = {
-              asset["name"]
-              for asset in doc["assets"]
-          }
-
-          if actual != expected:
+          remote_names = [asset["name"] for asset in doc["assets"]]
+          if len(remote_names) != 14 or len(set(remote_names)) != 14 or set(remote_names) != expected:
               raise SystemExit(
-                  "ERROR: release asset set mismatch\n"
-                  f"expected={sorted(expected)}\n"
-                  f"actual={sorted(actual)}"
+                  "ERROR: published release must have exactly 14 distinct assets; "
+                  f"expected={sorted(expected)} actual={sorted(remote_names)}"
               )
 
           print("immutable release flags + asset set: PASS")
@@ -925,131 +1146,16 @@ jobs:
           set -euo pipefail
           python3 tools/privacy-scan.py published
 
-      - name: Verify published checksums and release attestations
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.preflight.outputs.tag }}
-          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
-        run: |
-          set -euo pipefail
-
-          (
-            cd published
-            sha256sum -c SHA256SUMS
-          )
-
-          DEB="published/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          SPDX="published/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-          SOURCE="published/open-ipod-sync-${GITHUB_SHA}-source.tar"
-          MATERIALS="published/BUILD-MATERIALS.json"
-          TOOLCHAIN="published/TOOLCHAIN.json"
-
-          for required in \
-              "$SOURCE" \
-              "$MATERIALS" \
-              "$TOOLCHAIN"
-          do
-            [[ -f "$required" ]] || {
-              echo "ERROR: published verification asset missing: $required" >&2
-              exit 1
-            }
-          done
-
-          embedded_commit="$(
-            git get-tar-commit-id < "$SOURCE"
-          )"
-
-          [[ "$embedded_commit" == "$GITHUB_SHA" ]] || {
-            echo "ERROR: published source archive commit mismatch" >&2
-            exit 1
-          }
-
-          grep -F "$GITHUB_SHA" "$MATERIALS" >/dev/null || {
-            echo "ERROR: published build materials omit release commit" >&2
-            exit 1
-          }
-
-          gh release verify "$TAG" \
-            --repo "$GITHUB_REPOSITORY"
-
-          for asset in \
-              "$DEB" \
-              "$SPDX" \
-              "$SOURCE" \
-              "$MATERIALS" \
-              "$TOOLCHAIN" \
-              published/PROVENANCE.json \
-              published/CI-SHA256SUMS \
-              published/SHA256SUMS
-          do
-            gh release verify-asset \
-              "$TAG" \
-              "$asset" \
-              --repo "$GITHUB_REPOSITORY" \
-              >/dev/null
-          done
-
-          gh attestation verify "$DEB" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$DEB" \
-            --repo "$GITHUB_REPOSITORY" \
-            --predicate-type https://spdx.dev/Document/v2.3 \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$SPDX" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify published/PROVENANCE.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify published/CI-SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$SOURCE" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$MATERIALS" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$TOOLCHAIN" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          echo
-          echo "============================================================"
-          echo "AUTOMATED RELEASE: COMPLETE + VERIFIED"
-          echo "============================================================"
-      - name: Run independent consumer release verifier
+      - name: Run independent dual-platform consumer verifier
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-
-          python3 tools/verify-release.py \
+          python3 tools/verify-dual-release-github.py \
             published \
             --expected-commit "$GITHUB_SHA" \
-            --expected-repository \
-              "https://github.com/$GITHUB_REPOSITORY" \
-            --github \
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG"
-
-          echo "independent consumer verification: PASS"
+          echo "independent dual-platform consumer verification: PASS"
