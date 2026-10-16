@@ -86,7 +86,7 @@ The README should identify `0.2.0-alpha.8` as the current release.
 The changelog heading should be dated, for example:
 
 ```text
-## 0.2.0-alpha.8 — 2026-10-20
+## 0.2.0-alpha.8 — 2026-10-16
 ```
 
 It must no longer say `Unreleased`.
@@ -274,27 +274,41 @@ The workflow then publishes the prerelease using the verified CI artifacts.
 
 ## Published assets
 
-The public release bundle contains five assets.
+The public release contains exactly **14 assets**: six
+distribution-specific files for Debian 11, six for Ubuntu 26.04,
+one shared deterministic source archive, and one combined checksum manifest.
 
-For `0.2.0-alpha.8`, these would be:
+For `0.2.0-alpha.8`, the asset names are:
 
 ```text
 ipod-sync_0.2.0.alpha8_amd64.deb
 ipod-sync_0.2.0.alpha8_amd64.spdx.json
 PROVENANCE.json
+BUILD-MATERIALS.json
+TOOLCHAIN.json
 CI-SHA256SUMS
+ipod-sync-ubuntu2604_0.2.0.alpha8_amd64.deb
+ipod-sync-ubuntu2604_0.2.0.alpha8_amd64.spdx.json
+UBUNTU2604-PROVENANCE.json
+UBUNTU2604-BUILD-MATERIALS.json
+UBUNTU2604-TOOLCHAIN.json
+UBUNTU2604-CI-SHA256SUMS
+open-ipod-sync-<release-commit>-source.tar
 SHA256SUMS
 ```
 
-`CI-SHA256SUMS` is the exact manifest produced by normal CI.
+The source archive name contains the exact 40-character release commit SHA.
 
-`SHA256SUMS` is the release-specific manifest using the public release asset
-names.
+Both distribution bundles originate from the same successful
+`main` CI run. The Release workflow authenticates the CI artifacts
+and reuses their bytes without rebuilding the packages.
 
-The `.deb`, SPDX document, provenance file, and CI manifest are copied from the
-exact normal-CI artifact bundle.
+The combined `SHA256SUMS` covers the other 13 public assets.
+The two CI checksum manifests preserve the original CI artifact
+names and hashes.
 
-They are not rebuilt by the Release workflow.
+Release notes are transferred separately and are not a fifteenth
+public release asset.
 
 ## Step 8: automatic post-publication verification
 
@@ -306,16 +320,19 @@ The final job is:
 Verify published release
 ```
 
-It downloads all published assets again from GitHub and verifies:
+It downloads all 14 published assets again from GitHub and verifies:
 
-- release-specific `SHA256SUMS`;
-- GitHub signed release attestation;
-- release attestation for every individual asset;
-- SLSA provenance for the Debian artifact;
-- SPDX attestation bound to the Debian artifact;
-- SLSA provenance for the SPDX document;
-- SLSA provenance for `PROVENANCE.json`;
-- SLSA provenance for `CI-SHA256SUMS`.
+- the exact 14-file asset set, without duplicates or extra assets;
+- the combined release checksums;
+- the original Debian consumer-verification guarantees;
+- Ubuntu provenance, SPDX, pinned build-material, and source identity;
+- the immutable prerelease and annotated tag's source commit;
+- GitHub CI attestations for the signed artifact bytes;
+- separate Debian and Ubuntu SPDX package attestations;
+- the expected `main` source digest and signing workflow.
+
+The published directory is privacy-scanned before independent
+GitHub authenticity verification.
 
 A successful run ends with:
 

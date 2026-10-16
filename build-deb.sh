@@ -77,7 +77,7 @@ command -v readelf >/dev/null 2>&1 || {
 
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || echo "WARNING: only Debian 11 amd64 has been validated so far; building for $ARCH"
-VER="0.2.0~alpha7"
+VER="0.2.0~alpha8"
 PKG="ipod-sync_${VER}_${ARCH}"
 BUILD="$ROOT/build/$PKG"
 LIBSRC="$ROOT/build/libgpod-src"

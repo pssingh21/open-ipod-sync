@@ -4,6 +4,18 @@ All notable public changes to `open-ipod-sync` will be documented here.
 
 ## Unreleased
 
+## 0.2.0-alpha.8 — 2026-10-16
+
+First dual-platform Debian 11 and Ubuntu 26.04 amd64 package release.
+
+### Release engineering
+
+- Publish separate Debian 11 and Ubuntu 26.04 packages from the same verified source commit.
+- Publish the exact 14-asset release contract with platform-specific packages, SPDX documents, provenance, build materials, toolchain evidence, a shared source archive, and checksums.
+- Require pinned reproducibility checks, privacy validation, signed GitHub attestations, and independent offline and online consumer verification.
+- Preserve immutable-release publication, protected environment approval, and fail-closed release checks.
+- Preserve the strictly read-only NAS source invariant and existing ADD-only device-write behavior.
+
 ### Security
 
 - Reject upstream `ifuse` 1.2.0 before trusting an existing iPod mount or
