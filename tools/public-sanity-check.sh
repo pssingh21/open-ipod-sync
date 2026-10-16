@@ -32,6 +32,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_libgpod_playcounts_fix.py"
 # ifuse runtime/data-integrity safety regression tests.
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_ifuse_safety.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_private_ifuse_routing.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_vendored_ifuse_source.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_prepare_host_contract.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_mock_planner_integration.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_transaction_safety.py"
