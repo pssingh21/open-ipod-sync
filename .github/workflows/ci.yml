@@ -1489,6 +1489,8 @@ jobs:
       - package-build-audit
       - reproducibility-check
       - package-lifecycle
+      - ubuntu-host-compatibility
+      - ubuntu2604-reproducibility-check
 
     runs-on: ubuntu-24.04
     timeout-minutes: 10
