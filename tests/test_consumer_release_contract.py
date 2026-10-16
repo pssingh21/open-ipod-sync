@@ -370,6 +370,7 @@ expected = {
     "Ubuntu host compatibility — ubuntu-24.04",
     "Ubuntu host compatibility — ubuntu-26.04",
     "Ubuntu 26.04 independent reproducibility gate",
+    "Dual-platform release candidate smoke test",
     "GitHub artifact attestations",
     "GitHub Ubuntu 26.04 pinned artifact attestation",
 }

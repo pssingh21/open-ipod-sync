@@ -226,6 +226,7 @@ for token in (
     "package-lifecycle:",
     "ubuntu-host-compatibility:",
     "ubuntu2604-reproducibility-check:",
+    "dual-platform-release-candidate-check:",
     "attest-supply-chain:",
     "attest-ubuntu2604:",
 ):
@@ -246,7 +247,7 @@ for token in (
     assert token in RELEASE, token
 
 
-# Preserve the exact eight-job top-level CI contract.
+# Preserve the exact nine-job top-level CI contract.
 # The Ubuntu reproducibility gate is a distinct mandatory CI job.
 ci_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
@@ -263,10 +264,71 @@ assert ci_jobs == [
     "package-lifecycle",
     "ubuntu-host-compatibility",
     "ubuntu2604-reproducibility-check",
+    "dual-platform-release-candidate-check",
     "attest-supply-chain",
     "attest-ubuntu2604",
 ], ci_jobs
 
+
+# Real multi-platform CI candidate must be independently
+# assembled and checked without adding a publish channel.
+# Extract the CI job using exact YAML indentation.
+# This avoids fragile escaped-newline string matching.
+def extract_ci_job(workflow, job_name):
+    lines = workflow.splitlines(keepends=True)
+    heading = f"  {job_name}:"
+
+    matches = [
+        i for i, line in enumerate(lines)
+        if line.rstrip() == heading
+    ]
+
+    assert len(matches) == 1, (
+        f"Expected exactly one CI job: {job_name}; "
+        f"found {len(matches)}"
+    )
+
+    begin = matches[0]
+    end = len(lines)
+
+    for i in range(begin + 1, len(lines)):
+        line = lines[i]
+
+        # Top-level jobs use exactly two spaces.
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.strip().endswith(":")
+        ):
+            end = i
+            break
+
+    return "".join(lines[begin:end])
+
+
+candidate_ci = extract_ci_job(
+    CI, "dual-platform-release-candidate-check"
+)
+
+assert candidate_ci.count(
+    "uses: actions/download-artifact@"
+) == 2
+assert "uses: actions/upload-artifact@" not in candidate_ci
+
+for required in (
+    "- package-build-audit",
+    "- reproducibility-check",
+    "- ubuntu2604-reproducibility-check",
+    "persist-credentials: false",
+    "tools/prepare-dual-release-assets.py",
+    "--debian-ci ci-debian",
+    "--ubuntu-ci ci-ubuntu",
+    "--commit",
+    "sha256sum -c SHA256SUMS",
+    "python3 tools/privacy-scan.py",
+    "Exact 14-file release candidate: PASS",
+):
+    assert required in candidate_ci, required
 
 release_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
