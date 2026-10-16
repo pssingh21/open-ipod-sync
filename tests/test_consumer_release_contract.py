@@ -146,12 +146,81 @@ for forbidden in (
         )
 
 
-# Keep the existing single audited artifact channels.
+# Permit exactly two audited CI artifact channels:
+# the canonical Debian package and Ubuntu 26.04 package.
+# The independently verified release artifact channel remains unchanged.
 if CI.count(
     "uses: actions/upload-artifact@"
-) != 1:
+) != 2:
     raise SystemExit(
-        "ERROR: expected exactly one CI upload-artifact action"
+        "ERROR: expected exactly two CI upload-artifact actions"
+    )
+
+
+# Extract a top-level CI job by its exact YAML indentation.
+def extract_ci_job(workflow, job_name):
+    lines = workflow.splitlines(keepends=True)
+    heading = "  " + job_name + ":"
+
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip() == heading
+    ]
+
+    if len(matches) != 1:
+        raise SystemExit(
+            f"ERROR: expected exactly one {job_name} job; "
+            f"found {len(matches)}"
+        )
+
+    begin = matches[0]
+    end = len(lines)
+
+    for index in range(begin + 1, len(lines)):
+        line = lines[index]
+
+        # Other jobs have exactly two spaces of indentation.
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.strip().endswith(":")
+        ):
+            end = index
+            break
+
+    return "".join(lines[begin:end])
+
+
+ubuntu_job = extract_ci_job(
+    CI, "ubuntu-host-compatibility"
+)
+
+if ubuntu_job.count("uses: actions/upload-artifact@") != 1:
+    raise SystemExit(
+        "ERROR: expected one Ubuntu CI artifact upload"
+    )
+
+for token in (
+    "name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}",
+    "if: matrix.os == 'ubuntu-26.04'",
+    "if-no-files-found: error",
+    "python3 tools/privacy-scan.py ubuntu2604-artifact",
+    "sha256sum -c SHA256SUMS",
+):
+    require(
+        ubuntu_job,
+        token,
+        "Ubuntu 26.04 CI artifact contract",
+    )
+
+if ubuntu_job.index(
+    "python3 tools/privacy-scan.py ubuntu2604-artifact"
+) > ubuntu_job.index(
+    "      - name: Upload Ubuntu 26.04 package artifact"
+):
+    raise SystemExit(
+        "ERROR: Ubuntu privacy scan must precede upload"
     )
 
 if RELEASE.count(
@@ -265,7 +334,7 @@ print("consumer verification documentation: PASS")
 print("canonical consumer evidence in CI: PASS")
 print("canonical consumer evidence in release: PASS")
 print("internal A/B evidence remains unpublished: PASS")
-print("single audited artifact channels: PASS")
+print("audited CI and release artifact channels: PASS")
 print("exact eight-asset release contract: PASS")
 print("release workflow dogfoods consumer verifier: PASS")
 print("consumer release contract tests: PASS")

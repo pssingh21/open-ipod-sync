@@ -1374,6 +1374,51 @@ jobs:
 
           echo "host-built package lifecycle: PASS"
 
+      - name: Prepare Ubuntu 26.04 package artifact
+        if: matrix.os == 'ubuntu-26.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t debs < <(
+            find dist -maxdepth 1 -type f \
+              -name 'ipod-sync_*_amd64.deb' -print | sort
+          )
+
+          [[ "${#debs[@]}" -eq 1 ]] || {
+            echo "ERROR: expected exactly one package" >&2
+            exit 1
+          }
+
+          mkdir -p ubuntu2604-artifact
+          package_name="$(basename "${debs[0]}")"
+          cp -- "${debs[0]}" "ubuntu2604-artifact/$package_name"
+
+          python3 tools/generate-supply-chain-metadata.py \
+            "ubuntu2604-artifact/$package_name" \
+            --output-dir ubuntu2604-artifact \
+            --git-commit "$(git rev-parse HEAD)" \
+            --source-date-epoch "$(git log -1 --format=%ct)" \
+            --build-environment "ubuntu-26.04-amd64"
+
+          (
+            cd ubuntu2604-artifact
+            sha256sum ./*.deb ./*.spdx.json \
+              PROVENANCE.json > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+          python3 tools/privacy-scan.py ubuntu2604-artifact
+
+      - name: Upload Ubuntu 26.04 package artifact
+        if: matrix.os == 'ubuntu-26.04'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
+          path: ubuntu2604-artifact/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Verify build did not modify tracked source
         shell: bash
         run: |
