@@ -270,7 +270,9 @@ jobs:
               "Debian 11 package lifecycle",
               "Ubuntu host compatibility — ubuntu-24.04",
               "Ubuntu host compatibility — ubuntu-26.04",
+              "Ubuntu 26.04 independent reproducibility gate",
               "GitHub artifact attestations",
+              "GitHub Ubuntu 26.04 pinned artifact attestation",
           }
 
           missing = required - set(jobs)

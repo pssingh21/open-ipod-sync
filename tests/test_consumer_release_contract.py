@@ -344,6 +344,52 @@ for forbidden in (
             f"hermeticity claim: {forbidden}"
         )
 
+# Dual-platform release gate contract.
+# Identify the required CI job set without depending
+# on YAML or embedded Python indentation.
+import re
+
+matches = re.findall(
+    r"required\s*=\s*\{([^{}]*)\}\s*"
+    r"missing\s*=\s*required\s*-\s*set\(jobs\)",
+    RELEASE,
+    flags=re.DOTALL,
+)
+
+assert len(matches) == 1, (
+    "Expected exactly one release CI required-job set"
+)
+
+actual = re.findall(r'"([^"\n]+)"', matches[0])
+
+expected = {
+    "Public source sanity — Python 3.9",
+    "Debian 11 package build + audit",
+    "Debian 11 reproducibility gate",
+    "Debian 11 package lifecycle",
+    "Ubuntu host compatibility — ubuntu-24.04",
+    "Ubuntu host compatibility — ubuntu-26.04",
+    "Ubuntu 26.04 independent reproducibility gate",
+    "GitHub artifact attestations",
+    "GitHub Ubuntu 26.04 pinned artifact attestation",
+}
+
+assert len(actual) == len(expected)
+assert set(actual) == expected, (
+    f"Release CI gate mismatch: {actual}"
+)
+
+for check in (
+    'if run["headSha"] != expected:',
+    'if run["conclusion"] != "success":',
+    'if jobs[name] != "success"',
+):
+    assert check in RELEASE, (
+        f"Missing fail-closed release check: {check}"
+    )
+
+print("dual-platform release CI gate contract: PASS")
+
 print("consumer verification documentation: PASS")
 
 print("canonical consumer evidence in CI: PASS")
