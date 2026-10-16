@@ -1553,6 +1553,12 @@ jobs:
 
           python3 tools/privacy-scan.py "$candidate"
 
+          echo "===== INDEPENDENT DUAL RELEASE VERIFICATION ====="
+
+          python3 tools/verify-dual-release.py             "$candidate"             --expected-commit "$GITHUB_SHA"
+
+          echo "Dual-platform offline verification: PASS"
+
           echo "Real Debian and Ubuntu candidate: PASS"
           echo "Exact 14-file release candidate: PASS"
           echo "Checksum and privacy verification: PASS"
