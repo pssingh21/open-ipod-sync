@@ -333,6 +333,42 @@ def package_owner(path: Path) -> tuple[str, str]:
     return package, version
 
 
+# Ubuntu 26.04's uutils provider installs its executables
+# under this distribution-managed directory. This is NOT
+# a general-purpose additional executable search root.
+UUTILS_EXECUTABLE_DIR = Path(
+    "/usr/lib/cargo/bin/coreutils"
+)
+
+
+def trusted_distribution_coreutils_target(
+    command: str,
+    lexical: Path,
+    resolved: Path,
+) -> bool:
+    # Only a standard system command symlink can qualify.
+    if lexical not in (
+        Path("/usr/bin") / command,
+        Path("/bin") / command,
+    ):
+        return False
+
+    # Accept only the exact command-specific uutils target.
+    if resolved != UUTILS_EXECUTABLE_DIR / command:
+        return False
+
+    # Verify both ends against the installed package database.
+    # Unknown, unowned, or unexpected files fail closed.
+    provider, _ = package_owner(lexical)
+
+    if provider != "coreutils-from-uutils":
+        return False
+
+    binary_package, _ = package_owner(resolved)
+
+    return binary_package == "rust-coreutils"
+
+
 def resolve_command(
     command: str,
 ) -> dict[str, str] | None:
@@ -361,10 +397,16 @@ def resolve_command(
         )
 
     if not under_allowed_root(resolved):
-        raise RuntimeError(
-            f"tool {command} resolves outside declared "
-            f"system executable roots: {resolved}"
-        )
+        if not trusted_distribution_coreutils_target(
+            command,
+            lexical,
+            resolved,
+        ):
+            raise RuntimeError(
+                f"tool {command} resolves outside declared "
+                f"system executable roots or trusted packaged "
+                f"Ubuntu coreutils targets: {resolved}"
+            )
 
     st = resolved.stat()
 
@@ -461,6 +503,19 @@ def write_manifest(
         },
         "schema": SCHEMA,
     }
+
+    if any(
+        Path(record["target"]).parent
+        == UUTILS_EXECUTABLE_DIR
+        for record in records
+    ):
+        document["policy"]["distribution_coreutils_exception"] = {
+            "binary_package": "rust-coreutils",
+            "provider_package": "coreutils-from-uutils",
+            "target_directory": str(UUTILS_EXECUTABLE_DIR),
+            "exact_command_name_required": True,
+            "package_ownership_verified": True,
+        }
 
     path.parent.mkdir(
         parents=True,

@@ -225,7 +225,9 @@ for token in (
     "reproducibility-check:",
     "package-lifecycle:",
     "ubuntu-host-compatibility:",
+    "ubuntu2604-reproducibility-check:",
     "attest-supply-chain:",
+    "attest-ubuntu2604:",
 ):
     assert token in CI, token
 
@@ -244,7 +246,8 @@ for token in (
     assert token in RELEASE, token
 
 
-# Preserve the six-job top-level CI contract.
+# Preserve the exact eight-job top-level CI contract.
+# The Ubuntu reproducibility gate is a distinct mandatory CI job.
 ci_jobs = re.findall(
     r"(?m)^  ([A-Za-z0-9_-]+):\s*$",
     CI.split(
@@ -259,7 +262,9 @@ assert ci_jobs == [
     "reproducibility-check",
     "package-lifecycle",
     "ubuntu-host-compatibility",
+    "ubuntu2604-reproducibility-check",
     "attest-supply-chain",
+    "attest-ubuntu2604",
 ], ci_jobs
 
 

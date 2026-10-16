@@ -1374,51 +1374,6 @@ jobs:
 
           echo "host-built package lifecycle: PASS"
 
-      - name: Prepare Ubuntu 26.04 package artifact
-        if: matrix.os == 'ubuntu-26.04'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mapfile -t debs < <(
-            find dist -maxdepth 1 -type f \
-              -name 'ipod-sync_*_amd64.deb' -print | sort
-          )
-
-          [[ "${#debs[@]}" -eq 1 ]] || {
-            echo "ERROR: expected exactly one package" >&2
-            exit 1
-          }
-
-          mkdir -p ubuntu2604-artifact
-          package_name="$(basename "${debs[0]}")"
-          cp -- "${debs[0]}" "ubuntu2604-artifact/$package_name"
-
-          python3 tools/generate-supply-chain-metadata.py \
-            "ubuntu2604-artifact/$package_name" \
-            --output-dir ubuntu2604-artifact \
-            --git-commit "$(git rev-parse HEAD)" \
-            --source-date-epoch "$(git log -1 --format=%ct)" \
-            --build-environment "ubuntu-26.04-amd64"
-
-          (
-            cd ubuntu2604-artifact
-            sha256sum ./*.deb ./*.spdx.json \
-              PROVENANCE.json > SHA256SUMS
-            sha256sum -c SHA256SUMS
-          )
-
-          python3 tools/privacy-scan.py ubuntu2604-artifact
-
-      - name: Upload Ubuntu 26.04 package artifact
-        if: matrix.os == 'ubuntu-26.04'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
-          path: ubuntu2604-artifact/
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Verify build did not modify tracked source
         shell: bash
         run: |
@@ -1433,6 +1388,95 @@ jobs:
           git diff --cached --exit-code
 
           echo "tracked source remains unchanged: PASS"
+
+  ubuntu2604-reproducibility-check:
+    name: Ubuntu 26.04 independent reproducibility gate
+    needs: ubuntu-host-compatibility
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify Ubuntu reproducibility CI contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/test_ubuntu2604_repro_contract.py
+          python3 tests/test_ubuntu2604_uutils_toolchain.py
+
+      - name: Verify pinned Ubuntu 26.04 image and APT snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/verify-ubuntu2604-pinned-inputs.sh
+
+      - name: Run pinned Ubuntu 26.04 A/B matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/test-ubuntu2604-pinned-matrix.sh
+
+      - name: Prepare verified pinned Ubuntu candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/prepare-ubuntu2604-pinned-candidate.sh
+
+      - name: Verify pinned Ubuntu candidate for upload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          candidate="$RUNNER_TEMP/ubuntu2604-pinned-candidate"
+          test -d "$candidate"
+
+          (
+            cd "$candidate"
+            shopt -s nullglob
+
+            debs=(ipod-sync_*_amd64.deb)
+            sboms=(ipod-sync_*_amd64.spdx.json)
+            sources=(open-ipod-sync-*-source.tar)
+
+            test "${#debs[@]}" -eq 1
+            test "${#sboms[@]}" -eq 1
+            test "${#sources[@]}" -eq 1
+
+            test "${sboms[0]}" = "${debs[0]%.deb}.spdx.json"
+            test "${sources[0]}" =               "open-ipod-sync-${GITHUB_SHA}-source.tar"
+
+            for evidence in               PROVENANCE.json               BUILD-MATERIALS.json               TOOLCHAIN.json               SHA256SUMS
+            do
+              test -f "$evidence"
+            done
+
+            mapfile -t names < <(
+              find . -maxdepth 1 -type f -printf '%f\n' |
+              LC_ALL=C sort
+            )
+
+            test "${#names[@]}" -eq 7
+            sha256sum -c SHA256SUMS
+          )
+
+          python3 tools/privacy-scan.py "$candidate"
+
+          echo "Ubuntu pinned candidate upload gate: PASS"
+
+      - name: Upload verified pinned Ubuntu package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/ubuntu2604-pinned-candidate/
+          if-no-files-found: error
+          retention-days: 14
 
   attest-supply-chain:
     name: GitHub artifact attestations
@@ -1541,3 +1585,194 @@ jobs:
         with:
           subject-path: ${{ steps.bundle.outputs.deb }}
           sbom-path: ${{ steps.bundle.outputs.sbom }}
+
+  attest-ubuntu2604:
+    name: GitHub Ubuntu 26.04 pinned artifact attestation
+
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+    needs:
+      - ubuntu-host-compatibility
+      - ubuntu2604-reproducibility-check
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Check out verification code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified pinned Ubuntu bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
+          path: attested-ubuntu
+
+      - name: Verify Ubuntu pinned supply-chain bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle="attested-ubuntu"
+          test -d "$bundle"
+          shopt -s nullglob
+
+          debs=("$bundle"/ipod-sync_*_amd64.deb)
+          sboms=("$bundle"/*.spdx.json)
+          sources=("$bundle"/open-ipod-sync-*-source.tar)
+
+          [[ "${#debs[@]}" -eq 1 ]]
+          [[ "${#sboms[@]}" -eq 1 ]]
+          [[ "${#sources[@]}" -eq 1 ]]
+
+          deb="$(basename "${debs[0]}")"
+          sbom="${deb%.deb}.spdx.json"
+          source="open-ipod-sync-${GITHUB_SHA}-source.tar"
+
+          [[ "$(basename "${sboms[0]}")" == "$sbom" ]]
+          [[ "$(basename "${sources[0]}")" == "$source" ]]
+
+          expected=(
+            "$deb"
+            "$sbom"
+            "$source"
+            PROVENANCE.json
+            BUILD-MATERIALS.json
+            TOOLCHAIN.json
+            SHA256SUMS
+          )
+
+          mapfile -t expected_sorted < <(
+            printf '%s\n' "${expected[@]}" | LC_ALL=C sort
+          )
+
+          mapfile -t actual < <(
+            find "$bundle" -mindepth 1 -maxdepth 1 \
+              -printf '%f\n' | LC_ALL=C sort
+          )
+
+          diff -u \
+            <(printf '%s\n' "${expected_sorted[@]}") \
+            <(printf '%s\n' "${actual[@]}")
+
+          # Reject symlinks, directories and missing files.
+          for name in "${expected[@]}"; do
+            test -f "$bundle/$name"
+            test ! -L "$bundle/$name"
+          done
+
+          (
+            cd "$bundle"
+
+            # The checksum manifest must cover exactly
+            # the six non-manifest payload files.
+            mapfile -t expected_hashes < <(
+              printf '%s\n' \
+                "$deb" "$sbom" "$source" \
+                PROVENANCE.json \
+                BUILD-MATERIALS.json \
+                TOOLCHAIN.json |
+              LC_ALL=C sort
+            )
+
+            mapfile -t actual_hashes < <(
+              awk '{print $2}' SHA256SUMS | LC_ALL=C sort
+            )
+
+            diff -u \
+              <(printf '%s\n' "${expected_hashes[@]}") \
+              <(printf '%s\n' "${actual_hashes[@]}")
+
+            sha256sum -c SHA256SUMS
+          )
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$bundle/$source"
+          )"
+
+          [[ "$embedded_commit" == "$GITHUB_SHA" ]] || {
+            echo "ERROR: source archive commit mismatch" >&2
+            exit 1
+          }
+
+          test "$(
+            dpkg-deb -f "${debs[0]}" Architecture
+          )" = amd64
+
+          echo "Ubuntu exact seven-file contract: PASS"
+          echo "Ubuntu checksum integrity: PASS"
+          echo "Ubuntu source commit identity: PASS"
+
+      - name: Scan Ubuntu attestation privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/privacy-scan.py attested-ubuntu
+          echo "Ubuntu attestation privacy boundary: PASS"
+
+      - name: Attest verified Ubuntu pinned bundle
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            attested-ubuntu/*.deb
+            attested-ubuntu/*.spdx.json
+            attested-ubuntu/PROVENANCE.json
+            attested-ubuntu/BUILD-MATERIALS.json
+            attested-ubuntu/TOOLCHAIN.json
+            attested-ubuntu/open-ipod-sync-*-source.tar
+            attested-ubuntu/SHA256SUMS
+
+      - name: Independently verify Ubuntu GitHub attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh --version
+          shopt -s nullglob
+
+          files=(attested-ubuntu/*)
+          [[ "${#files[@]}" -eq 7 ]]
+
+          for file in "${files[@]}"; do
+            verified=false
+
+            # Allow for brief GitHub API indexing delay.
+            for attempt in 1 2 3 4 5 6 7 8; do
+              echo "Attestation verification attempt ${attempt}/8 for $(basename "$file")"
+
+              if gh attestation verify "$file" \
+                --repo "$GITHUB_REPOSITORY" \
+                --source-ref "refs/heads/main" \
+                --source-digest "$GITHUB_SHA" \
+                --signer-workflow \
+                  "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+                --deny-self-hosted-runners
+              then
+                verified=true
+                break
+              fi
+
+              sleep 5
+            done
+
+            if [[ "$verified" != true ]]; then
+              echo "ERROR: attestation failed: $file" >&2
+              exit 1
+            fi
+
+            echo "verified: $(basename "$file")"
+          done
+
+          echo "Ubuntu GitHub signed attestations: PASS"
