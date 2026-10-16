@@ -278,6 +278,7 @@ CONFIG=/etc/ipod-sync/config.env
 : "${IPOD_SYNC_SOURCE:=/mnt/music}"
 : "${IPOD_SYNC_MOUNT:=$HOME/ipod}"
 APP=/usr/lib/ipod-sync/ipod_sync.py
+IFUSE_BUNDLED_BUILD=0
 IFUSE_POLICY_MARKER=/usr/lib/ipod-sync/ifuse-bundled-required
 PRIVATE_IFUSE=/usr/lib/ipod-sync/bin/ifuse
 IFUSE_BIN=""
@@ -285,7 +286,15 @@ IFUSE_BIN=""
 mount_info() { findmnt -n -M "$IPOD_SYNC_MOUNT" -o FSTYPE,OPTIONS 2>/dev/null || true; }
 
 require_safe_ifuse() {
-  if [[ -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 ]]; then
+    if [[ ! -f "$IFUSE_POLICY_MARKER" ||
+          -L "$IFUSE_POLICY_MARKER" ||
+          "$(<"$IFUSE_POLICY_MARKER")" != "1.2.1" ]]; then
+      echo "REFUSED: bundled ifuse policy marker missing or invalid" >&2
+      exit 2
+    fi
+  fi
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 || -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
     if [[ ! -f "$PRIVATE_IFUSE" || -L "$PRIVATE_IFUSE" ||
           ! -x "$PRIVATE_IFUSE" ]]; then
       echo "REFUSED: bundled ifuse 1.2.1 is missing or invalid" >&2
@@ -338,7 +347,7 @@ require_safe_ifuse() {
     fi
   fi
 
-  if [[ -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+  if [[ "$IFUSE_BUNDLED_BUILD" == 1 || -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
     if [[ "$version" != "1.2.1" ]]; then
       echo "REFUSED: bundled ifuse must report exactly 1.2.1" >&2
       exit 2
@@ -411,6 +420,45 @@ USAGE
     exit 2 ;;
 esac
 WRAP
+python3 - "$BUILD/usr/bin/ipod-sync" \
+  "$BUILD/usr/lib/ipod-sync/ipod_sync.py" \
+  "$BUNDLE_IFUSE" <<'STAMP_IFUSE_POLICY'
+from pathlib import Path
+import sys
+
+launcher_path = Path(sys.argv[1])
+app_path = Path(sys.argv[2])
+bundled = sys.argv[3] == "1"
+
+changes = (
+    (launcher_path,
+     "IFUSE_BUNDLED_BUILD=0",
+     "IFUSE_BUNDLED_BUILD=1"),
+    (app_path,
+     "BUNDLED_IFUSE_BUILD = False",
+     "BUNDLED_IFUSE_BUILD = True"),
+)
+
+prepared = []
+for path, old, new in changes:
+    source = path.read_text()
+    if source.count(old) != 1:
+        raise SystemExit(
+            f"ERROR: invalid package policy stamp: {path}"
+        )
+    prepared.append((
+        path,
+        source.replace(old, new, 1) if bundled else source,
+    ))
+
+for path, content in prepared:
+    path.write_text(content)
+
+print(
+    "Packaged ifuse policy:",
+    "mandatory bundled 1.2.1" if bundled else "system runtime",
+)
+STAMP_IFUSE_POLICY
 chmod 0755 "$BUILD/usr/bin/ipod-sync"
 
 cat > "$BUILD/DEBIAN/preinst" <<'PREINST'

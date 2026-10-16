@@ -235,6 +235,69 @@ IFUSE_LICENSE="$PAYLOAD/usr/share/doc/ipod-sync/ifuse-COPYING"
 
 AUDIT_ELFS=("$SYNC_ELF" "$LIBGPOD_ELF")
 
+echo "===== EMBEDDED IFUSE POLICY ====="
+
+EXPECTED_WRAPPER_STAMP=""
+EXPECTED_APP_STAMP=""
+
+case "$IFUSE_POLICY" in
+  bundled-1.2.1)
+    EXPECTED_WRAPPER_STAMP="IFUSE_BUNDLED_BUILD=1"
+    EXPECTED_APP_STAMP="BUNDLED_IFUSE_BUILD = True"
+    ;;
+  system)
+    EXPECTED_WRAPPER_STAMP="IFUSE_BUNDLED_BUILD=0"
+    EXPECTED_APP_STAMP="BUNDLED_IFUSE_BUILD = False"
+    ;;
+  "")
+    # Legacy Debian artifacts may lack the policy field.
+    # They must also lack the new embedded-policy stamps.
+    if grep -Eq '^IFUSE_BUNDLED_BUILD=' "$WRAPPER" ||
+       grep -Eq '^BUNDLED_IFUSE_BUILD =' "$APP"; then
+      echo "FAIL: embedded ifuse policy lacks package metadata" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "FAIL: unrecognized embedded ifuse package policy" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "$EXPECTED_WRAPPER_STAMP" ]]; then
+  [[ "$(grep -Ec '^IFUSE_BUNDLED_BUILD=[01]$' "$WRAPPER")" == 1 ]] || {
+    echo "FAIL: invalid number of launcher policy stamps" >&2
+    exit 1
+  }
+
+  [[ "$(grep -Ec '^BUNDLED_IFUSE_BUILD = (True|False)$' "$APP")" == 1 ]] || {
+    echo "FAIL: invalid number of Python policy stamps" >&2
+    exit 1
+  }
+
+  grep -Fxq "$EXPECTED_WRAPPER_STAMP" "$WRAPPER" || {
+    echo "FAIL: embedded ifuse launcher policy mismatch" >&2
+    exit 1
+  }
+
+  grep -Fxq "$EXPECTED_APP_STAMP" "$APP" || {
+    echo "FAIL: embedded ifuse Python policy mismatch" >&2
+    exit 1
+  }
+
+  grep -Fq 'if [[ "$IFUSE_BUNDLED_BUILD" == 1 ]]; then' "$WRAPPER" || {
+    echo "FAIL: mandatory launcher policy guard missing" >&2
+    exit 1
+  }
+
+  grep -Fq 'if BUNDLED_IFUSE_BUILD:' "$APP" || {
+    echo "FAIL: mandatory Python policy guard missing" >&2
+    exit 1
+  }
+fi
+
+echo "embedded ifuse package policy: PASS"
+
 case "$IFUSE_POLICY" in
   bundled-1.2.1)
     [[ -f "$IFUSE_ELF" && -x "$IFUSE_ELF" &&
