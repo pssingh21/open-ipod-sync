@@ -1,3 +1,4 @@
+import subprocess
 #!/usr/bin/env python3
 
 from pathlib import Path
@@ -333,7 +334,7 @@ for required in (
 # The real dual-platform candidate must use exactly
 # the same public filename convention as release.yml.
 assert candidate_ci.count(
-    'public_version="${deb_version//~/.}"'
+    'public_version="${deb_version//\~/.}"'
 ) == 1
 
 assert candidate_ci.count(
@@ -343,7 +344,7 @@ assert candidate_ci.count(
 assert '--public-version "$deb_version"' not in candidate_ci
 
 assert (
-    'PUBLIC_VERSION="${DEB_VERSION//~/.}"'
+    'PUBLIC_VERSION="${DEB_VERSION//\~/.}"'
     in RELEASE
 )
 
@@ -363,6 +364,45 @@ assert release_jobs == [
     "verify",
 ], release_jobs
 
+
+# RELEASE_VERSION_RUNTIME_CONTRACT
+# Execute the actual Bash assignment from both workflows.
+# Static substring checks alone cannot detect tilde expansion.
+for label, workflow, input_var, output_var in (
+    ("CI", CI, "deb_version", "public_version"),
+    ("Release", RELEASE, "DEB_VERSION", "PUBLIC_VERSION"),
+):
+    prefix = output_var + "="
+
+    assignments = [
+        line.strip()
+        for line in workflow.splitlines()
+        if line.strip().startswith(prefix)
+    ]
+
+    assert len(assignments) == 1, (
+        f"{label}: expected exactly one version assignment"
+    )
+
+    script = chr(10).join((
+        f'{input_var}="0.2.0~alpha7"',
+        assignments[0],
+        f'printf "%s" "${{{output_var}}}"',
+        "",
+    ))
+
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout == "0.2.0.alpha7", (
+        f"{label}: incorrect normalization: {result.stdout!r}"
+    )
+
+    print(f"{label} public version normalization: PASS")
 
 print(
     "repository policy contract tests: PASS"

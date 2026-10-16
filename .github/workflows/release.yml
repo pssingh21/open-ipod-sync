@@ -71,7 +71,7 @@ jobs:
           }
 
           DEB_VERSION="${RELEASE_VERSION/-alpha./~alpha}"
-          PUBLIC_VERSION="${DEB_VERSION//~/.}"
+          PUBLIC_VERSION="${DEB_VERSION//\~/.}"
           TAG="v${RELEASE_VERSION}"
 
           echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
