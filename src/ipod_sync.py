@@ -168,6 +168,28 @@ def run(
 
 
 def require_cmd(name: str) -> str:
+    if name == "ifuse":
+        marker = PROJECT / "ifuse-bundled-required"
+        if marker.exists() or marker.is_symlink():
+            binary = PROJECT / "bin" / "ifuse"
+            try:
+                info = binary.lstat()
+            except OSError as exc:
+                raise SyncError(
+                    "required bundled ifuse 1.2.1 is missing"
+                ) from exc
+
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or not os.access(binary, os.X_OK)
+                or binary.is_symlink()
+            ):
+                raise SyncError(
+                    "required bundled ifuse is not a regular "
+                    "executable file"
+                )
+            return str(binary)
+
     p = shutil.which(name)
     if not p:
         raise SyncError(f"required command not found: {name}")
@@ -418,7 +440,26 @@ def ifuse_version(binary: str | None = None) -> tuple[int, int, int]:
 
 def require_safe_ifuse(binary: str | None = None) -> tuple[int, int, int]:
     """Reject upstream ifuse 1.2.0 before trusting any device filesystem data."""
+    marker = PROJECT / "ifuse-bundled-required"
+    bundled_required = marker.exists() or marker.is_symlink()
+
+    if bundled_required:
+        selected = require_cmd("ifuse")
+        if (
+            binary is not None
+            and os.path.abspath(binary) != selected
+        ):
+            raise SyncError(
+                "bundled ifuse required; refusing alternate executable"
+            )
+        binary = selected
+
     version = ifuse_version(binary)
+
+    if bundled_required and version != (1, 2, 1):
+        raise SyncError(
+            "bundled ifuse must report exactly version 1.2.1"
+        )
 
     if version == (1, 2, 0):
         raise SyncError(

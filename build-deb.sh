@@ -201,18 +201,31 @@ CONFIG=/etc/ipod-sync/config.env
 : "${IPOD_SYNC_SOURCE:=/mnt/music}"
 : "${IPOD_SYNC_MOUNT:=$HOME/ipod}"
 APP=/usr/lib/ipod-sync/ipod_sync.py
+IFUSE_POLICY_MARKER=/usr/lib/ipod-sync/ifuse-bundled-required
+PRIVATE_IFUSE=/usr/lib/ipod-sync/bin/ifuse
+IFUSE_BIN=""
 
 mount_info() { findmnt -n -M "$IPOD_SYNC_MOUNT" -o FSTYPE,OPTIONS 2>/dev/null || true; }
 
 require_safe_ifuse() {
-  command -v ifuse >/dev/null 2>&1 || {
-    echo "REFUSED: required command not found: ifuse" >&2
-    exit 2
-  }
+  if [[ -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+    if [[ ! -f "$PRIVATE_IFUSE" || -L "$PRIVATE_IFUSE" ||
+          ! -x "$PRIVATE_IFUSE" ]]; then
+      echo "REFUSED: bundled ifuse 1.2.1 is missing or invalid" >&2
+      exit 2
+    fi
+    IFUSE_BIN="$PRIVATE_IFUSE"
+  else
+    IFUSE_BIN="$(command -v ifuse || true)"
+    if [[ -z "$IFUSE_BIN" ]]; then
+      echo "REFUSED: required command not found: ifuse" >&2
+      exit 2
+    fi
+  fi
 
   local output version="" active_ifuse package_version
 
-  if ! output="$(ifuse --version 2>&1)"; then
+  if ! output="$("$IFUSE_BIN" --version 2>&1)"; then
     echo "REFUSED: unable to determine ifuse version" >&2
     exit 2
   fi
@@ -220,9 +233,7 @@ require_safe_ifuse() {
   if [[ "$output" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
     version="${BASH_REMATCH[1]}"
   else
-    active_ifuse="$(
-      command -v ifuse
-    )"
+    active_ifuse="$IFUSE_BIN"
 
     package_version=""
 
@@ -250,6 +261,13 @@ require_safe_ifuse() {
     fi
   fi
 
+  if [[ -e "$IFUSE_POLICY_MARKER" || -L "$IFUSE_POLICY_MARKER" ]]; then
+    if [[ "$version" != "1.2.1" ]]; then
+      echo "REFUSED: bundled ifuse must report exactly 1.2.1" >&2
+      exit 2
+    fi
+  fi
+
   if [[ "$version" == "1.2.0" ]]; then
     echo "REFUSED: unsafe ifuse version detected: 1.2.0" >&2
     echo "ifuse 1.2.0 has an upstream-confirmed data-corruption bug." >&2
@@ -271,7 +289,7 @@ ensure_ro_mount() {
   mapfile -t ids < <(idevice_id -l)
   [[ "${#ids[@]}" -eq 1 ]] || { echo "REFUSED: expected exactly one connected iOS device; found ${#ids[@]}" >&2; exit 2; }
   idevicepair validate >/dev/null
-  ifuse "$IPOD_SYNC_MOUNT" -o ro
+  "$IFUSE_BIN" "$IPOD_SYNC_MOUNT" -o ro
   local info fstype opts
   info="$(mount_info)"; fstype="${info%% *}"; opts="${info#* }"
   [[ "$fstype" == "fuse.ifuse" && ",$opts," == *,ro,* ]] || { echo "ERROR: failed to establish read-only ifuse mount" >&2; exit 2; }
