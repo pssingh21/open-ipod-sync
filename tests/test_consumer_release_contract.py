@@ -389,31 +389,68 @@ for check in (
     )
 
 # UBUNTU_RELEASE_INPUT_CONTRACT
+
+# Match complete YAML step-heading lines rather than relying
+# on embedded newline escape sequences.
+release_lines = RELEASE.splitlines()
+
 ubuntu_steps = (
     "Download exact Ubuntu 26.04 CI bundle",
     "Verify Ubuntu 26.04 CI bundle and attestations",
     "Prepare immutable release bundle",
 )
 
-for step in ubuntu_steps:
-    assert RELEASE.count(
-        f"      - name: {step}\\n"
-    ) == 1, step
+positions = []
 
-assert (
-    RELEASE.index(ubuntu_steps[0])
-    < RELEASE.index(ubuntu_steps[1])
-    < RELEASE.index(ubuntu_steps[2])
+for name in ubuntu_steps:
+    heading = f"      - name: {name}"
+
+    matches = [
+        index
+        for index, line in enumerate(release_lines)
+        if line == heading
+    ]
+
+    assert len(matches) == 1, (
+        f"Expected exactly one release step: {name}; "
+        f"found {len(matches)}"
+    )
+
+    positions.append(matches[0])
+
+assert positions == sorted(positions)
+assert len(set(positions)) == len(positions)
+
+download = "\n".join(
+    release_lines[positions[0]:positions[1]]
 )
 
+verify = "\n".join(
+    release_lines[positions[1]:positions[2]]
+)
+
+# Download must refer to the exact selected main CI run.
 for token in (
-    'ipod-sync-ubuntu2604-amd64-$GITHUB_SHA',
+    'RUN_ID: ${{ steps.ci.outputs.run_id }}',
+    'gh run download "$RUN_ID"',
     '--name "ipod-sync-ubuntu2604-amd64-$GITHUB_SHA"',
-    'ci-ubuntu2604/PROVENANCE.json',
-    'ci-ubuntu2604',
-    'cmp \\\n',
-    'git get-tar-commit-id',
+    '--dir ci-ubuntu2604',
+):
+    assert token in download, (
+        f"Ubuntu artifact download contract missing: {token}"
+    )
+
+# Verify both metadata linkage and security checks
+# before preparing any public release assets.
+for token in (
+    'bundle="ci-ubuntu2604"',
+    'root = Path("ci-ubuntu2604")',
+    '"PROVENANCE.json"',
+    '"BUILD-MATERIALS.json"',
+    '"TOOLCHAIN.json"',
     'sha256sum -c SHA256SUMS',
+    'git get-tar-commit-id',
+    'ci-bundle/$source',
     'open-ipod-sync-build-materials-v1',
     'open-ipod-sync-provenance-v1',
     'ubuntu-26.04-snapshot-20261015T000000Z',
@@ -423,8 +460,23 @@ for token in (
     '--source-digest',
     '--signer-workflow',
     '--deny-self-hosted-runners',
+    'Ubuntu signed CI bundle verification: PASS',
 ):
-    assert token in RELEASE, token
+    assert token in verify, (
+        f"Ubuntu artifact verification missing: {token}"
+    )
+
+assert verify.index(
+    'sha256sum -c SHA256SUMS'
+) < verify.index(
+    'gh attestation verify "$subject"'
+)
+
+assert verify.index(
+    'python3 tools/privacy-scan.py "$bundle"'
+) < verify.index(
+    'gh attestation verify "$subject"'
+)
 
 print("Ubuntu release input verification contract: PASS")
 
