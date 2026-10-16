@@ -1719,6 +1719,7 @@ jobs:
           path: attested-ubuntu
 
       - name: Verify Ubuntu pinned supply-chain bundle
+        id: bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -1809,6 +1810,9 @@ jobs:
             dpkg-deb -f "${debs[0]}" Architecture
           )" = amd64
 
+          printf 'deb=%s\n' "${debs[0]}" >> "$GITHUB_OUTPUT"
+          printf 'sbom=%s\n' "${sboms[0]}" >> "$GITHUB_OUTPUT"
+
           echo "Ubuntu exact seven-file contract: PASS"
           echo "Ubuntu checksum integrity: PASS"
           echo "Ubuntu source commit identity: PASS"
@@ -1831,6 +1835,12 @@ jobs:
             attested-ubuntu/TOOLCHAIN.json
             attested-ubuntu/open-ipod-sync-*-source.tar
             attested-ubuntu/SHA256SUMS
+
+      - name: Attest Ubuntu package with SPDX SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.bundle.outputs.deb }}
+          sbom-path: ${{ steps.bundle.outputs.sbom }}
 
       - name: Independently verify Ubuntu GitHub attestations
         shell: bash
@@ -1874,5 +1884,20 @@ jobs:
 
             echo "verified: $(basename "$file")"
           done
+
+          debs=(attested-ubuntu/ipod-sync_*_amd64.deb)
+          test "${#debs[@]}" -eq 1
+
+          gh attestation verify "${debs[0]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --source-ref "refs/heads/main" \
+            --source-digest "$GITHUB_SHA" \
+            --signer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo "Ubuntu SPDX SBOM attestation: PASS"
 
           echo "Ubuntu GitHub signed attestations: PASS"

@@ -777,6 +777,18 @@ jobs:
             echo "Verified: $(basename "$subject")"
           done
 
+          gh attestation verify "$bundle/$deb" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --source-ref "refs/heads/main" \
+            --source-digest "$GITHUB_SHA" \
+            --signer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --deny-self-hosted-runners \
+            >/dev/null
+
+          echo "Signed Ubuntu SPDX evidence: PASS"
+
           echo "Ubuntu signed CI bundle verification: PASS"
 
       - name: Prepare immutable release bundle

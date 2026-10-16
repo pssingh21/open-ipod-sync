@@ -389,6 +389,40 @@ for check in (
         f"Missing fail-closed release check: {check}"
     )
 
+# UBUNTU_SPDX_ATTESTATION_CONTRACT
+ubuntu_attestation_job = CI.split(
+    "  attest-ubuntu2604:", 1
+)[1]
+
+for token in (
+    "id: bundle",
+    "Attest Ubuntu package with SPDX SBOM",
+    "subject-path: ${{ steps.bundle.outputs.deb }}",
+    "sbom-path: ${{ steps.bundle.outputs.sbom }}",
+    "Ubuntu SPDX SBOM attestation: PASS",
+    "--predicate-type https://spdx.dev/Document/v2.3",
+):
+    assert token in ubuntu_attestation_job, token
+
+ubuntu_release_step = RELEASE.split(
+    "      - name: Verify Ubuntu 26.04 CI bundle and attestations",
+    1,
+)[1].split(
+    "      - name: Prepare immutable release bundle",
+    1,
+)[0]
+
+for token in (
+    "Signed Ubuntu SPDX evidence: PASS",
+    "--predicate-type https://spdx.dev/Document/v2.3",
+    '--source-digest "$GITHUB_SHA"',
+    "--signer-workflow",
+    "--deny-self-hosted-runners",
+):
+    assert token in ubuntu_release_step, token
+
+print("Ubuntu SPDX attestation parity contract: PASS")
+
 # UBUNTU_RELEASE_INPUT_CONTRACT
 
 # Match complete YAML step-heading lines rather than relying

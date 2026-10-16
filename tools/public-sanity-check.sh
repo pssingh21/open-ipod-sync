@@ -44,6 +44,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_privacy_boundary_workflows.p
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_source_path_security.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_dual_release_assets.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_dual_release_verifier.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/test_dual_release_github.py"
 
 # Legacy private-development and migration fingerprints are enforced by
 # tools/privacy-scan.py below so there is one canonical privacy policy.
