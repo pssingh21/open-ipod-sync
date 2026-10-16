@@ -303,6 +303,140 @@ for token in (
 for forbidden in ('fully hermetic build', 'fully-hermetic build'):
     assert forbidden not in README and forbidden not in RUNBOOK
 
+import re
+
+# EXECUTABLE_RELEASE_IDENTITY_CONTRACT
+import subprocess
+import sys
+import tempfile
+import textwrap
+
+identity_start = "      - name: Validate release identity"
+identity_end = "      - name: Locate exact successful main CI run"
+
+assert RELEASE.count(identity_start) == 1
+assert RELEASE.count(identity_end) == 1
+
+identity_section = RELEASE.split(
+    identity_start, 1
+)[1].split(identity_end, 1)[0]
+
+lines = identity_section.splitlines()
+
+python_heading = '          python3 - "$RELEASE_VERSION" <<\'PY\''
+python_footer = "          PY"
+
+starts = [
+    i for i, line in enumerate(lines)
+    if line == python_heading
+]
+
+assert len(starts) == 1
+
+ends = [
+    i for i in range(starts[0] + 1, len(lines))
+    if lines[i] == python_footer
+]
+
+assert len(ends) == 1
+
+embedded_python = textwrap.dedent(
+    "\n".join(lines[starts[0] + 1:ends[0]]) + "\n"
+)
+
+compile(embedded_python, "<release-identity>", "exec")
+
+versions = re.findall(
+    r'^VERSION = "([^"]+)"$',
+    (ROOT / "src/ipod_sync.py").read_text(),
+    re.MULTILINE,
+)
+assert len(versions) == 1
+
+version = versions[0]
+readme = (ROOT / "README.md").read_text()
+changelog = (ROOT / "CHANGELOG.md").read_text()
+
+block = (
+    "## Current release\n\n"
+    "```text\n"
+    f"{version}\n"
+    "```"
+)
+assert readme.count(block) == 1
+
+with tempfile.TemporaryDirectory() as temporary:
+    directory = Path(temporary)
+
+    def run_identity(readme_content, changelog_content):
+        (directory / "README.md").write_text(
+            readme_content
+        )
+        (directory / "CHANGELOG.md").write_text(
+            changelog_content
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                embedded_python,
+                version,
+            ],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    valid = run_identity(readme, changelog)
+    assert valid.returncode == 0, (
+        valid.stdout + valid.stderr
+    )
+    assert "release documentation identity: PASS" in valid.stdout
+
+    print("Actual alpha release identity: PASS")
+
+    wrong_version = readme.replace(
+        block,
+        block.replace(version, "9.9.9-alpha.999"),
+        1,
+    )
+
+    missing_heading = readme.replace(
+        "## Current release\n",
+        "## Latest version\n",
+        1,
+    )
+
+    duplicated_heading = readme + "\n" + block + "\n"
+
+    changelog_heading = f"## {version} — "
+    assert changelog.count(changelog_heading) == 1
+
+    invalid_changelog = changelog.replace(
+        changelog_heading,
+        "## 9.9.9-alpha.999 — ",
+        1,
+    )
+
+    for label, candidate_readme, candidate_changelog in (
+        ("incorrect version", wrong_version, changelog),
+        ("missing heading", missing_heading, changelog),
+        ("duplicate heading", duplicated_heading, changelog),
+        ("incorrect changelog", readme, invalid_changelog),
+    ):
+        result = run_identity(
+            candidate_readme,
+            candidate_changelog,
+        )
+        assert result.returncode != 0, (
+            f"Release preflight accepted {label}"
+        )
+        print(f"Release identity rejects {label}: PASS")
+
+print("Executable release identity contract: PASS")
+
 # Dual-platform release gate contract.
 # Identify the required CI job set without depending
 # on YAML or embedded Python indentation.
