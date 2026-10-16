@@ -54,7 +54,37 @@ for marker in ("EXPECT_"+"RND", "EXPECT_"+"IV", "EXPECT_"+"PRISTINE_SIG"):
     assert marker not in signer
 
 v=subprocess.run([sys.executable,str(APP),'--version'],text=True,capture_output=True,check=True).stdout.strip()
-assert '0.2.0-alpha.7' in v,v
+# Verify consistent version identity without hard-coding
+# a specific alpha release into this regression test.
+import re
+
+assert re.fullmatch(
+    r"[0-9]+[.][0-9]+[.][0-9]+-alpha[.][0-9]+",
+    m.VERSION,
+), m.VERSION
+
+assert v == f"{APP.name} {m.VERSION}", (v, m.VERSION)
+
+assert m.__doc__.splitlines()[0] == (
+    f"ipod-sync {m.VERSION}"
+)
+
+package_source = (ROOT / "build-deb.sh").read_text()
+package_versions = re.findall(
+    r'^VER="([^"]+)"$',
+    package_source,
+    re.MULTILINE,
+)
+
+expected_package_version = m.VERSION.replace(
+    "-alpha.", "~alpha"
+)
+
+assert package_versions == [
+    expected_package_version
+], (package_versions, expected_package_version)
+
+print("Application, CLI and Debian version consistency: PASS")
 
 text=APP.read_text()
 assert ('audited-' + 'frozen') not in text

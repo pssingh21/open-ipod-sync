@@ -16,7 +16,7 @@ The synchronization model is currently **incremental ADD-only**.
 ## Current release
 
 ```text
-0.2.0-alpha.6
+0.2.0-alpha.8
 ```
 
 This software is **experimental**.
@@ -31,7 +31,7 @@ The generic incremental ADD path has been live-tested end-to-end during developm
 - post-commit database validation;
 - physical playback on the iPod.
 
-A fresh live ADD transaction has not yet been performed with the exact `0.2.0-alpha.6` release artifact itself. Treat this release as an alpha.
+A fresh live ADD transaction has not yet been performed with the exact `0.2.0-alpha.8` release artifact itself. Treat this release as an alpha.
 
 ## Validated platform
 
@@ -66,11 +66,19 @@ The normal workflow is:
 
 Download the Debian package for the release you want to use.
 
-For the current validated release:
+For Debian 11 amd64:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0.alpha6_amd64.deb
+sudo apt install ./ipod-sync_0.2.0.alpha8_amd64.deb
 ```
+
+For Ubuntu 26.04 amd64, use its separately built package:
+
+```bash
+sudo apt install ./ipod-sync-ubuntu2604_0.2.0.alpha8_amd64.deb
+```
+
+On Ubuntu 26.04, verify that the active `ifuse` runtime is safe before connecting or mounting an iPod. The known-unsafe upstream `ifuse` 1.2.0 is rejected; use the project's documented host preparation procedure for the pinned 1.2.1 runtime.
 
 Verify the installation:
 
