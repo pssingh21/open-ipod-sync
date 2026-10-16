@@ -12,8 +12,10 @@ This project interoperates with and/or redistributes pieces from established fre
   `f7eac74184ff240c8ba9cf9b413eed75968a462a`.
   The source includes its upstream LGPL-2.1 license.
   `third_party/ifuse-1.2.1-UPSTREAM.txt` records the source identity.
-  This source is being prepared for a private executable in the
-  Ubuntu 26.04 package; packaging integration is a separate step.
+  The Ubuntu 26.04 package builds and ships this source as the
+  private `/usr/lib/ipod-sync/bin/ifuse` executable.
+  The package includes the upstream licensing notice and audits
+  the executable. Debian 11 retains its system-ifuse dependency.
   `ifuse` 1.2.0 is explicitly unsupported because upstream confirmed a serious data-corruption bug. The fix is available in upstream ifuse 1.2.1.
 
   The known-unsafe system `ifuse` 1.2.0 remains prohibited for mounting.
