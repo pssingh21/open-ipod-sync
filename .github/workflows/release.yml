@@ -850,144 +850,39 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.vars.outputs.version }}
-          DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
-          PUBLIC_VERSION: ${{ steps.vars.outputs.public_version }}
         run: |
           set -euo pipefail
 
-          mkdir -p release
+          candidate="$RUNNER_TEMP/dual-release-preflight"
+          test -d "$candidate"
+          test ! -L "$candidate"
+          test ! -e release
+          cp -a "$candidate" release
 
-          CI_DEB="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.deb"
-          CI_SPDX="ci-bundle/ipod-sync_${DEB_VERSION}_amd64.spdx.json"
-          CI_SOURCE="ci-bundle/open-ipod-sync-${GITHUB_SHA}-source.tar"
+          # Verify exact candidate bytes before notes enter the transfer bundle.
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          python3 tools/privacy-scan.py release
 
-          RELEASE_DEB="ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          RELEASE_SPDX="ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-          RELEASE_SOURCE="open-ipod-sync-${GITHUB_SHA}-source.tar"
-
-          [[ -f "$CI_DEB" ]] || {
-            echo "ERROR: exact CI Debian artifact missing: $CI_DEB" >&2
-            exit 1
-          }
-
-          [[ -f "$CI_SPDX" ]] || {
-            echo "ERROR: exact CI SPDX artifact missing: $CI_SPDX" >&2
-            exit 1
-          }
-
-          [[ -f "$CI_SOURCE" ]] || {
-            echo "ERROR: exact CI source archive missing: $CI_SOURCE" >&2
-            exit 1
-          }
-
-          [[ -f ci-bundle/BUILD-MATERIALS.json ]] || {
-            echo "ERROR: BUILD-MATERIALS.json missing from CI bundle" >&2
-            exit 1
-          }
-
-          [[ -f ci-bundle/TOOLCHAIN.json ]] || {
-            echo "ERROR: TOOLCHAIN.json missing from CI bundle" >&2
-            exit 1
-          }
-
-          cp "$CI_DEB" \
-             "release/$RELEASE_DEB"
-
-          cp "$CI_SPDX" \
-             "release/$RELEASE_SPDX"
-
-          cp ci-bundle/PROVENANCE.json \
-             release/PROVENANCE.json
-
-          cp ci-bundle/SHA256SUMS \
-             release/CI-SHA256SUMS
-
-          cp "$CI_SOURCE" \
-             "release/$RELEASE_SOURCE"
-
-          cp ci-bundle/BUILD-MATERIALS.json \
-             release/BUILD-MATERIALS.json
-
-          cp ci-bundle/TOOLCHAIN.json \
-             release/TOOLCHAIN.json
-
-          cmp -s "$CI_DEB" \
-            "release/$RELEASE_DEB"
-
-          cmp -s "$CI_SPDX" \
-            "release/$RELEASE_SPDX"
-
-          cmp -s ci-bundle/PROVENANCE.json \
-            release/PROVENANCE.json
-
-          cmp -s ci-bundle/SHA256SUMS \
-            release/CI-SHA256SUMS
-
-          cmp -s "$CI_SOURCE" \
-            "release/$RELEASE_SOURCE"
-
-          cmp -s ci-bundle/BUILD-MATERIALS.json \
-            release/BUILD-MATERIALS.json
-
-          cmp -s ci-bundle/TOOLCHAIN.json \
-            release/TOOLCHAIN.json
-
-          (
-            cd release
-
-            sha256sum \
-              "$RELEASE_DEB" \
-              "$RELEASE_SPDX" \
-              PROVENANCE.json \
-              CI-SHA256SUMS \
-              "$RELEASE_SOURCE" \
-              BUILD-MATERIALS.json \
-              TOOLCHAIN.json \
-              > SHA256SUMS
-
-            sha256sum -c SHA256SUMS
-          )
-
-          python3 - "$RELEASE_VERSION" <<'PY'
+          python3 - "$RELEASE_VERSION" <<'PY_NOTES'
           from pathlib import Path
           import sys
-
           version = sys.argv[1]
           text = Path("CHANGELOG.md").read_text()
-
           marker = f"## {version} — "
           start = text.find(marker)
-
           if start == -1:
-              raise SystemExit(
-                  f"ERROR: changelog entry missing for {version}"
-              )
-
+              raise SystemExit("ERROR: release changelog entry missing")
           next_heading = text.find("\n## ", start + len(marker))
-
-          if next_heading == -1:
-              section = text[start:].rstrip()
-          else:
-              section = text[start:next_heading].rstrip()
-
+          section = text[start:next_heading].rstrip() if next_heading != -1 else text[start:].rstrip()
           if "— Unreleased" in section.splitlines()[0]:
-              raise SystemExit(
-                  f"ERROR: {version} changelog is still Unreleased"
-              )
+              raise SystemExit("ERROR: release is marked Unreleased")
+          Path("release/RELEASE-NOTES.md").write_text(section + "\n")
+          print("Release notes extracted without changing 14 public assets: PASS")
+          PY_NOTES
 
-          Path("release/RELEASE-NOTES.md").write_text(
-              section + "\n"
-          )
-
-          print("release notes extraction: PASS")
-          PY
-
-          echo "prepared release bundle:"
-          find release \
-            -maxdepth 1 \
-            -type f \
-            -printf '%f\n' |
-          sort
+          test "$(find release -mindepth 1 -maxdepth 1 | wc -l)" -eq 15
+          echo "Exact 14 public assets + separate release notes: PASS"
 
       - name: Scan verified release bundle privacy boundary
         shell: bash
@@ -1037,44 +932,35 @@ jobs:
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
             echo "ERROR: publication ref is not main" >&2
             exit 1
           }
-
           git fetch --no-tags origin main
-
-          MAIN_SHA="$(git rev-parse origin/main)"
-
-          [[ "$MAIN_SHA" == "$GITHUB_SHA" ]] || {
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
             echo "ERROR: main moved after release dispatch" >&2
-            echo "dispatch SHA: $GITHUB_SHA" >&2
-            echo "current main: $MAIN_SHA" >&2
             exit 1
           }
-
-          if git ls-remote --exit-code \
-              --tags origin \
-              "refs/tags/$TAG" >/dev/null 2>&1
-          then
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "ERROR: tag appeared after preflight: $TAG" >&2
             exit 1
           fi
-
-          if gh release view "$TAG" \
-              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
-          then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "ERROR: release appeared after preflight: $TAG" >&2
             exit 1
           fi
 
-          (
-            cd release
-            sha256sum -c SHA256SUMS
-          )
+          # Notes were transferred with the preflight artifact, not published.
+          test -f release/RELEASE-NOTES.md
+          test ! -L release/RELEASE-NOTES.md
+          test ! -e "$RUNNER_TEMP/RELEASE-NOTES.md"
+          mv release/RELEASE-NOTES.md "$RUNNER_TEMP/RELEASE-NOTES.md"
+          test -s "$RUNNER_TEMP/RELEASE-NOTES.md"
 
-          echo "publication boundary: PASS"
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          python3 tools/privacy-scan.py release
+          echo "Approved exact 14-asset publication boundary: PASS"
 
       - name: Scan publication privacy boundary
         shell: bash
@@ -1131,31 +1017,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
         run: |
           set -euo pipefail
-
-          DEB="release/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          SPDX="release/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-
-          gh release create "$TAG" \
-            "$DEB" \
-            "$SPDX" \
-            release/PROVENANCE.json \
-            release/CI-SHA256SUMS \
-            "release/open-ipod-sync-${GITHUB_SHA}-source.tar" \
-            release/BUILD-MATERIALS.json \
-            release/TOOLCHAIN.json \
-            release/SHA256SUMS \
+          # The preceding step fails unless release/ is exactly the verified
+          # 14-file set. The shell glob expands those exact asset files.
+          python3 tools/verify-dual-release.py \
+            release --expected-commit "$GITHUB_SHA"
+          test -s "$RUNNER_TEMP/RELEASE-NOTES.md"
+          gh release create "$TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --prerelease \
             --latest=false \
             --fail-on-no-commits \
             --title "open-ipod-sync $RELEASE_VERSION" \
-            --notes-file release/RELEASE-NOTES.md
-
-          echo "release publication requested: PASS"
+            --notes-file "$RUNNER_TEMP/RELEASE-NOTES.md"
+          echo "Dual-platform 14-asset publication requested: PASS"
 
       - name: Verify published release flags
         shell: bash
@@ -1203,21 +1080,21 @@ jobs:
               "SHA256SUMS",
               "BUILD-MATERIALS.json",
               "TOOLCHAIN.json",
+              "UBUNTU2604-CI-SHA256SUMS",
+              "UBUNTU2604-PROVENANCE.json",
+              "UBUNTU2604-BUILD-MATERIALS.json",
+              "UBUNTU2604-TOOLCHAIN.json",
               f"open-ipod-sync-{commit}-source.tar",
               f"ipod-sync_{public_version}_amd64.deb",
               f"ipod-sync_{public_version}_amd64.spdx.json",
+              f"ipod-sync-ubuntu2604_{public_version}_amd64.deb",
+              f"ipod-sync-ubuntu2604_{public_version}_amd64.spdx.json",
           }
-
-          actual = {
-              asset["name"]
-              for asset in doc["assets"]
-          }
-
-          if actual != expected:
+          remote_names = [asset["name"] for asset in doc["assets"]]
+          if len(remote_names) != 14 or len(set(remote_names)) != 14 or set(remote_names) != expected:
               raise SystemExit(
-                  "ERROR: release asset set mismatch\n"
-                  f"expected={sorted(expected)}\n"
-                  f"actual={sorted(actual)}"
+                  "ERROR: published release must have exactly 14 distinct assets; "
+                  f"expected={sorted(expected)} actual={sorted(remote_names)}"
               )
 
           print("immutable release flags + asset set: PASS")
@@ -1269,131 +1146,16 @@ jobs:
           set -euo pipefail
           python3 tools/privacy-scan.py published
 
-      - name: Verify published checksums and release attestations
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.preflight.outputs.tag }}
-          PUBLIC_VERSION: ${{ needs.preflight.outputs.public_version }}
-        run: |
-          set -euo pipefail
-
-          (
-            cd published
-            sha256sum -c SHA256SUMS
-          )
-
-          DEB="published/ipod-sync_${PUBLIC_VERSION}_amd64.deb"
-          SPDX="published/ipod-sync_${PUBLIC_VERSION}_amd64.spdx.json"
-          SOURCE="published/open-ipod-sync-${GITHUB_SHA}-source.tar"
-          MATERIALS="published/BUILD-MATERIALS.json"
-          TOOLCHAIN="published/TOOLCHAIN.json"
-
-          for required in \
-              "$SOURCE" \
-              "$MATERIALS" \
-              "$TOOLCHAIN"
-          do
-            [[ -f "$required" ]] || {
-              echo "ERROR: published verification asset missing: $required" >&2
-              exit 1
-            }
-          done
-
-          embedded_commit="$(
-            git get-tar-commit-id < "$SOURCE"
-          )"
-
-          [[ "$embedded_commit" == "$GITHUB_SHA" ]] || {
-            echo "ERROR: published source archive commit mismatch" >&2
-            exit 1
-          }
-
-          grep -F "$GITHUB_SHA" "$MATERIALS" >/dev/null || {
-            echo "ERROR: published build materials omit release commit" >&2
-            exit 1
-          }
-
-          gh release verify "$TAG" \
-            --repo "$GITHUB_REPOSITORY"
-
-          for asset in \
-              "$DEB" \
-              "$SPDX" \
-              "$SOURCE" \
-              "$MATERIALS" \
-              "$TOOLCHAIN" \
-              published/PROVENANCE.json \
-              published/CI-SHA256SUMS \
-              published/SHA256SUMS
-          do
-            gh release verify-asset \
-              "$TAG" \
-              "$asset" \
-              --repo "$GITHUB_REPOSITORY" \
-              >/dev/null
-          done
-
-          gh attestation verify "$DEB" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$DEB" \
-            --repo "$GITHUB_REPOSITORY" \
-            --predicate-type https://spdx.dev/Document/v2.3 \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$SPDX" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify published/PROVENANCE.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify published/CI-SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$SOURCE" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$MATERIALS" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          gh attestation verify "$TOOLCHAIN" \
-            --repo "$GITHUB_REPOSITORY" \
-            --deny-self-hosted-runners \
-            >/dev/null
-
-          echo
-          echo "============================================================"
-          echo "AUTOMATED RELEASE: COMPLETE + VERIFIED"
-          echo "============================================================"
-      - name: Run independent consumer release verifier
+      - name: Run independent dual-platform consumer verifier
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-
-          python3 tools/verify-release.py \
+          python3 tools/verify-dual-release-github.py \
             published \
             --expected-commit "$GITHUB_SHA" \
-            --expected-repository \
-              "https://github.com/$GITHUB_REPOSITORY" \
-            --github \
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG"
-
-          echo "independent consumer verification: PASS"
+          echo "independent dual-platform consumer verification: PASS"

@@ -70,46 +70,19 @@ for token in (
     )
 
 
-# Consumer-visible release evidence.
+# Consumer-visible release evidence and independent verifier.
 for token in (
-    'CI_SOURCE="ci-bundle/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    "ci-bundle/BUILD-MATERIALS.json",
-    "ci-bundle/TOOLCHAIN.json",
-    'RELEASE_SOURCE="open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    "release/BUILD-MATERIALS.json",
-    "release/TOOLCHAIN.json",
-    '"release/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    'f"open-ipod-sync-{commit}-source.tar"',
-    'SOURCE="published/open-ipod-sync-${GITHUB_SHA}-source.tar"',
-    'MATERIALS="published/BUILD-MATERIALS.json"',
-    'TOOLCHAIN="published/TOOLCHAIN.json"',
+    'tools/prepare-dual-release-assets.py',
+    'tools/verify-dual-release.py',
+    'tools/verify-dual-release-github.py',
+    'Release preflight 14-asset candidate: PASS',
+    'Approved exact 14-asset publication boundary: PASS',
+    'gh release create "$TAG" release/*',
+    '--notes-file "$RUNNER_TEMP/RELEASE-NOTES.md"',
+    'Run independent dual-platform consumer verifier',
+    'independent dual-platform consumer verification: PASS',
 ):
-    require(
-        RELEASE,
-        token,
-        "release workflow",
-    )
-
-
-# The same externally usable verifier must be exercised by release CI.
-for token in (
-    "Run independent consumer release verifier",
-    "python3 tools/verify-release.py",
-    "--expected-commit",
-    '"$GITHUB_SHA"',
-    "--expected-repository",
-    '"https://github.com/$GITHUB_REPOSITORY"',
-    "--github",
-    '--repo "$GITHUB_REPOSITORY"',
-    '--tag "$TAG"',
-    "independent consumer verification: PASS",
-):
-    require(
-        RELEASE,
-        token,
-        "release consumer-verification step",
-    )
-
+    require(RELEASE, token, 'dual-platform release workflow')
 
 # Consumer verifier schemas / trust layers.
 for token in (
@@ -247,23 +220,32 @@ if RELEASE.count(
     )
 
 
-# The release workflow must still be fail-closed on an exact asset set.
+# The release must reject missing, extra or duplicate remote assets.
 for token in (
     '"CI-SHA256SUMS"',
     '"PROVENANCE.json"',
     '"SHA256SUMS"',
     '"BUILD-MATERIALS.json"',
     '"TOOLCHAIN.json"',
+    '"UBUNTU2604-CI-SHA256SUMS"',
+    '"UBUNTU2604-PROVENANCE.json"',
+    '"UBUNTU2604-BUILD-MATERIALS.json"',
+    '"UBUNTU2604-TOOLCHAIN.json"',
     'f"open-ipod-sync-{commit}-source.tar"',
     'f"ipod-sync_{public_version}_amd64.deb"',
     'f"ipod-sync_{public_version}_amd64.spdx.json"',
+    'f"ipod-sync-ubuntu2604_{public_version}_amd64.deb"',
+    'f"ipod-sync-ubuntu2604_{public_version}_amd64.spdx.json"',
+    'len(remote_names) != 14',
 ):
-    require(
-        RELEASE,
-        token,
-        "exact release asset contract",
-    )
+    require(RELEASE, token, 'exact dual-platform asset set')
 
+assert RELEASE.count('gh release create "$TAG"') == 1
+assert RELEASE.count('uses: actions/upload-artifact@') == 1
+assert 'gh release upload' not in RELEASE
+assert RELEASE.index('Verify exact dual-platform release candidate') < RELEASE.index('Publish prerelease')
+assert RELEASE.index('Revalidate publication boundary') < RELEASE.index('Publish prerelease')
+assert RELEASE.index('Download published assets fresh') < RELEASE.index('Run independent dual-platform consumer verifier')
 
 # Reproducibility checksum manifests intentionally have different scopes.
 #
@@ -294,55 +276,32 @@ if (
         "full-scope SHA256SUMS as a core payload"
     )
 
-# Consumer-facing documentation is part of the release contract.
+# Consumer-facing documentation remains part of the contract.
 for token in (
-    "## Independently verify a release",
-    "Every new release publishes enough evidence",
-    "exactly these eight assets",
-    "BUILD-MATERIALS.json",
-    "TOOLCHAIN.json",
-    "open-ipod-sync-<40-character-commit>-source.tar",
-    "python3 tools/verify-release.py",
-    "--expected-commit",
-    "--expected-repository",
-    "--github",
-    "--repo",
-    "--tag",
-    "offline operation",
-    "never reads or modifies the music source directory",
+    '## Independently verify a release',
+    'exactly fourteen assets',
+    'UBUNTU2604-PROVENANCE.json',
+    'UBUNTU2604-BUILD-MATERIALS.json',
+    'ipod-sync-ubuntu2604_<public-version>_amd64.deb',
+    'tools/verify-dual-release.py',
+    'tools/verify-dual-release-github.py',
+    'eight-asset',
+    'read-only source invariant',
 ):
-    require(
-        README,
-        token,
-        "README consumer verification documentation",
-    )
-
+    require(README, token, 'consumer README')
 for token in (
-    "## Independent consumer verification contract",
-    "exact eight-asset contract",
-    "CI evidence entering the release workflow",
-    "Post-publication verification",
-    "independent consumer verifier",
-    "Failure handling",
-    "immutable release",
-    "Trust-boundary statement",
-    "NAS/source-library read-only invariant is unchanged",
+    '## Independent consumer verification contract',
+    'exact fourteen-asset contract',
+    'CI evidence entering the release workflow',
+    'Post-publication verification',
+    'Failure handling',
+    'immutable release',
+    'Trust-boundary statement',
+    'NAS/source-library read-only invariant is unchanged',
 ):
-    require(
-        RUNBOOK,
-        token,
-        "release runbook consumer verification documentation",
-    )
-
-for forbidden in (
-    "fully hermetic build",
-    "fully-hermetic build",
-):
-    if forbidden in README or forbidden in RUNBOOK:
-        raise SystemExit(
-            "ERROR: documentation contains unsupported "
-            f"hermeticity claim: {forbidden}"
-        )
+    require(RUNBOOK, token, 'release runbook')
+for forbidden in ('fully hermetic build', 'fully-hermetic build'):
+    assert forbidden not in README and forbidden not in RUNBOOK
 
 # Dual-platform release gate contract.
 # Identify the required CI job set without depending
@@ -590,6 +549,6 @@ print("canonical consumer evidence in CI: PASS")
 print("canonical consumer evidence in release: PASS")
 print("internal A/B evidence remains unpublished: PASS")
 print("audited CI and release artifact channels: PASS")
-print("exact eight-asset release contract: PASS")
+print("exact fourteen-asset release contract: PASS")
 print("release workflow dogfoods consumer verifier: PASS")
 print("consumer release contract tests: PASS")

@@ -90,8 +90,41 @@ require_order(
 require_order(
     RELEASE,
     "Scan published release privacy boundary",
-    "Verify published checksums and release attestations",
+    "Run independent dual-platform consumer verifier",
 )
+
+# The published assets must pass the privacy scanner
+# before independent 14-asset authenticity verification.
+scan_heading = (
+    "      - name: Scan published release privacy boundary"
+)
+verify_heading = (
+    "      - name: Run independent dual-platform consumer verifier"
+)
+
+assert RELEASE.splitlines().count(scan_heading) == 1
+assert RELEASE.splitlines().count(verify_heading) == 1
+
+scan_step = RELEASE.split(
+    scan_heading, 1
+)[1].split(
+    verify_heading, 1
+)[0]
+
+verify_step = RELEASE.split(verify_heading, 1)[1]
+
+assert "python3 tools/privacy-scan.py published" in scan_step
+
+for required in (
+    "tools/verify-dual-release-github.py",
+    "published",
+    '--expected-commit "$GITHUB_SHA"',
+    '--repo "$GITHUB_REPOSITORY"',
+    '--tag "$TAG"',
+):
+    assert required in verify_step, required
+
+print("Published dual-platform privacy boundary: PASS")
 
 # Preserve exactly two CI artifact channels.
 assert CI.count("uses: actions/upload-artifact@") == 2
