@@ -791,6 +791,61 @@ jobs:
 
           echo "Ubuntu signed CI bundle verification: PASS"
 
+      - name: Verify exact dual-platform release candidate
+        shell: bash
+        env:
+          DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
+          PUBLIC_VERSION: ${{ steps.vars.outputs.public_version }}
+        run: |
+          set -euo pipefail
+
+          echo "===== ASSEMBLE BOTH VERIFIED CI BUNDLES ====="
+
+          candidate="$RUNNER_TEMP/dual-release-preflight"
+
+          test ! -e "$candidate"
+
+          python3 tools/prepare-dual-release-assets.py \
+            --debian-ci ci-bundle \
+            --ubuntu-ci ci-ubuntu2604 \
+            --output "$candidate" \
+            --deb-version "$DEB_VERSION" \
+            --public-version "$PUBLIC_VERSION" \
+            --commit "$GITHUB_SHA"
+
+          echo "===== VERIFY EXACT CANDIDATE ====="
+
+          python3 tools/verify-dual-release.py \
+            "$candidate" \
+            --expected-commit "$GITHUB_SHA"
+
+          echo "===== VERIFY CHECKSUMS ====="
+
+          (
+            cd "$candidate"
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "===== ENFORCE FILE COUNT ====="
+
+          mapfile -t candidate_files < <(
+            find "$candidate" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              -printf '%f\n' |
+            LC_ALL=C sort
+          )
+
+          test "${#candidate_files[@]}" -eq 14
+
+          echo "===== PRIVACY SCAN ====="
+
+          python3 tools/privacy-scan.py "$candidate"
+
+          echo "Release preflight 14-asset candidate: PASS"
+          echo "Dual-platform offline verification: PASS"
+          echo "No release publication performed"
+
       - name: Prepare immutable release bundle
         shell: bash
         env:

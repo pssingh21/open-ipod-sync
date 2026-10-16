@@ -423,6 +423,73 @@ for token in (
 
 print("Ubuntu SPDX attestation parity contract: PASS")
 
+# DUAL_PLATFORM_RELEASE_PREFLIGHT_CONTRACT
+dual_preflight_heading = (
+    "      - name: Verify exact dual-platform release candidate"
+)
+legacy_preparation_heading = (
+    "      - name: Prepare immutable release bundle"
+)
+ubuntu_verification_heading = (
+    "      - name: Verify Ubuntu 26.04 CI bundle and attestations"
+)
+
+for heading in (
+    ubuntu_verification_heading,
+    dual_preflight_heading,
+    legacy_preparation_heading,
+):
+    assert RELEASE.splitlines().count(heading) == 1, heading
+
+assert (
+    RELEASE.index(ubuntu_verification_heading)
+    < RELEASE.index(dual_preflight_heading)
+    < RELEASE.index(legacy_preparation_heading)
+)
+
+dual_release_preflight = RELEASE.split(
+    dual_preflight_heading, 1
+)[1].split(
+    legacy_preparation_heading, 1
+)[0]
+
+for token in (
+    "set -euo pipefail",
+    "tools/prepare-dual-release-assets.py",
+    "--debian-ci ci-bundle",
+    "--ubuntu-ci ci-ubuntu2604",
+    '--output "$candidate"',
+    '--deb-version "$DEB_VERSION"',
+    '--public-version "$PUBLIC_VERSION"',
+    '--commit "$GITHUB_SHA"',
+    "tools/verify-dual-release.py",
+    '--expected-commit "$GITHUB_SHA"',
+    "sha256sum -c SHA256SUMS",
+    'test "${#candidate_files[@]}" -eq 14',
+    'python3 tools/privacy-scan.py "$candidate"',
+    "Release preflight 14-asset candidate: PASS",
+):
+    assert token in dual_release_preflight, token
+
+assert (
+    dual_release_preflight.index("tools/prepare-dual-release-assets.py")
+    < dual_release_preflight.index("tools/verify-dual-release.py")
+    < dual_release_preflight.index("sha256sum -c SHA256SUMS")
+    < dual_release_preflight.index("python3 tools/privacy-scan.py")
+)
+
+# No publication, tag creation, or artifact-upload action
+# may be introduced into the candidate-validation step.
+for forbidden in (
+    "gh release create",
+    "git push",
+    "actions/upload-artifact@",
+    "gh release upload",
+):
+    assert forbidden not in dual_release_preflight, forbidden
+
+print("Dual-platform release preflight contract: PASS")
+
 # UBUNTU_RELEASE_INPUT_CONTRACT
 
 # Match complete YAML step-heading lines rather than relying
