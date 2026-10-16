@@ -504,6 +504,280 @@ jobs:
 
           echo "CI checksums + attestations + verification evidence: PASS"
 
+      - name: Download exact Ubuntu 26.04 CI bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ci-ubuntu2604
+
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "ipod-sync-ubuntu2604-amd64-$GITHUB_SHA" \
+            --dir ci-ubuntu2604
+
+          echo "Ubuntu bundle downloaded from exact main CI run"
+
+      - name: Verify Ubuntu 26.04 CI bundle and attestations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_DEB_VERSION: ${{ steps.vars.outputs.deb_version }}
+        run: |
+          set -euo pipefail
+
+          bundle="ci-ubuntu2604"
+          deb="ipod-sync_${EXPECTED_DEB_VERSION}_amd64.deb"
+          spdx="${deb%.deb}.spdx.json"
+          source="open-ipod-sync-${GITHUB_SHA}-source.tar"
+
+          echo "===== EXACT UBUNTU ARTIFACT FILE SET ====="
+
+          expected=(
+            "$deb"
+            "$spdx"
+            "$source"
+            PROVENANCE.json
+            BUILD-MATERIALS.json
+            TOOLCHAIN.json
+            SHA256SUMS
+          )
+
+          mapfile -t expected_sorted < <(
+            printf '%s\n' "${expected[@]}" | LC_ALL=C sort
+          )
+
+          mapfile -t actual < <(
+            find "$bundle" -mindepth 1 -maxdepth 1 \
+              -printf '%f\n' | LC_ALL=C sort
+          )
+
+          diff -u \
+            <(printf '%s\n' "${expected_sorted[@]}") \
+            <(printf '%s\n' "${actual[@]}")
+
+          for name in "${expected[@]}"; do
+            test -f "$bundle/$name"
+            test ! -L "$bundle/$name"
+          done
+
+          echo "Ubuntu seven-file contract: PASS"
+
+          echo "===== CHECKSUM VERIFICATION ====="
+
+          (
+            cd "$bundle"
+
+            mapfile -t hashed < <(
+              awk '{print $2}' SHA256SUMS |
+              LC_ALL=C sort
+            )
+
+            mapfile -t expected_hashes < <(
+              printf '%s\n' \
+                "$deb" "$spdx" "$source" \
+                PROVENANCE.json \
+                BUILD-MATERIALS.json \
+                TOOLCHAIN.json |
+              LC_ALL=C sort
+            )
+
+            diff -u \
+              <(printf '%s\n' "${expected_hashes[@]}") \
+              <(printf '%s\n' "${hashed[@]}")
+
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "Ubuntu checksum integrity: PASS"
+
+          echo "===== VERIFY PACKAGE AND SOURCE IDENTITY ====="
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Package
+          )" = ipod-sync
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Version
+          )" = "$EXPECTED_DEB_VERSION"
+
+          test "$(
+            dpkg-deb -f "$bundle/$deb" Architecture
+          )" = amd64
+
+          embedded_commit="$(
+            git get-tar-commit-id < "$bundle/$source"
+          )"
+
+          test "$embedded_commit" = "$GITHUB_SHA"
+
+          # Debian and Ubuntu must use identical source bytes.
+          cmp \
+            "$bundle/$source" \
+            "ci-bundle/$source"
+
+          echo "Package version and common source: PASS"
+
+          echo "===== VERIFY SUPPLY-CHAIN METADATA ====="
+
+          python3 - "$GITHUB_SHA" "$EXPECTED_DEB_VERSION" <<'PY_META'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          commit, version = sys.argv[1:]
+          root = Path("ci-ubuntu2604")
+
+          deb = f"ipod-sync_{version}_amd64.deb"
+          spdx = deb[:-4] + ".spdx.json"
+          source = f"open-ipod-sync-{commit}-source.tar"
+
+          def digest(name):
+              return hashlib.sha256(
+                  (root / name).read_bytes()
+              ).hexdigest()
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit("ERROR: " + message)
+
+          provenance = json.loads(
+              (root / "PROVENANCE.json").read_text()
+          )
+          sbom = json.loads((root / spdx).read_text())
+          materials = json.loads(
+              (root / "BUILD-MATERIALS.json").read_text()
+          )
+          toolchain = json.loads(
+              (root / "TOOLCHAIN.json").read_text()
+          )
+
+          require(
+              provenance["schema"] ==
+              "open-ipod-sync-provenance-v1",
+              "provenance schema",
+          )
+          require(
+              provenance["source"]["git_commit"] == commit,
+              "provenance source commit",
+          )
+          require(
+              provenance["subject"] == {
+                  "name": deb,
+                  "sha256": digest(deb),
+              },
+              "provenance package subject",
+          )
+          require(
+              provenance["package"]["version"] == version
+              and provenance["package"]["architecture"] == "amd64",
+              "provenance package version and architecture",
+          )
+          require(
+              provenance["build"]["environment"]
+              == "ubuntu-26.04-amd64",
+              "Ubuntu build environment",
+          )
+          require(
+              provenance["sbom"]["name"] == spdx
+              and provenance["sbom"]["sha256"] == digest(spdx),
+              "provenance SPDX linkage",
+          )
+
+          require(
+              sbom["spdxVersion"] == "SPDX-2.3",
+              "SPDX document version",
+          )
+          packages = [
+              item for item in sbom["packages"]
+              if item.get("SPDXID") ==
+              "SPDXRef-Package-ipod-sync"
+          ]
+          require(len(packages) == 1, "SPDX root package")
+          package = packages[0]
+          require(
+              package["packageFileName"] == deb
+              and package["versionInfo"] == version,
+              "SPDX package identity",
+          )
+          require(
+              any(
+                  item.get("algorithm") == "SHA256"
+                  and item.get("checksumValue") == digest(deb)
+                  for item in package["checksums"]
+              ),
+              "SPDX package digest",
+          )
+
+          require(
+              materials["schema"] ==
+              "open-ipod-sync-build-materials-v1",
+              "build materials schema",
+          )
+          require(
+              materials["source"]["commit"] == commit
+              and materials["source"]["archive_sha256"]
+              == digest(source),
+              "build materials source identity",
+          )
+          env = materials["declared_environment"]
+          require(
+              env["base_image_identity"] ==
+              "docker.io/library/ubuntu@sha256:"
+              "88a381d5b5eeb2b35d3ad70925a362c37ce569daf43ede89ff818ec20e4d3794",
+              "pinned Ubuntu image identity",
+          )
+          require(
+              env["snapshot_identity"] ==
+              "ubuntu-26.04-snapshot-20261015T000000Z",
+              "pinned Ubuntu snapshot identity",
+          )
+          require(
+              toolchain["schema"] ==
+              "open-ipod-sync-toolchain-view-v1",
+              "toolchain schema",
+          )
+          require(
+              materials["observed_environment"]["architecture"]
+              == "amd64",
+              "observed architecture",
+          )
+
+          print("Ubuntu provenance linkage: PASS")
+          print("Ubuntu SPDX linkage: PASS")
+          print("Pinned build materials: PASS")
+          print("Toolchain evidence: PASS")
+          PY_META
+
+          echo "===== PRIVACY BOUNDARY ====="
+
+          python3 tools/privacy-scan.py "$bundle"
+
+          echo "===== VERIFY GITHUB ATTESTATIONS ====="
+
+          shopt -s nullglob
+          subjects=("$bundle"/*)
+          test "${#subjects[@]}" -eq 7
+
+          for subject in "${subjects[@]}"; do
+            gh attestation verify "$subject" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-ref "refs/heads/main" \
+              --source-digest "$GITHUB_SHA" \
+              --signer-workflow \
+                "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+              --deny-self-hosted-runners \
+              >/dev/null
+
+            echo "Verified: $(basename "$subject")"
+          done
+
+          echo "Ubuntu signed CI bundle verification: PASS"
+
       - name: Prepare immutable release bundle
         shell: bash
         env:

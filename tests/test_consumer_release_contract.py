@@ -388,6 +388,46 @@ for check in (
         f"Missing fail-closed release check: {check}"
     )
 
+# UBUNTU_RELEASE_INPUT_CONTRACT
+ubuntu_steps = (
+    "Download exact Ubuntu 26.04 CI bundle",
+    "Verify Ubuntu 26.04 CI bundle and attestations",
+    "Prepare immutable release bundle",
+)
+
+for step in ubuntu_steps:
+    assert RELEASE.count(
+        f"      - name: {step}\\n"
+    ) == 1, step
+
+assert (
+    RELEASE.index(ubuntu_steps[0])
+    < RELEASE.index(ubuntu_steps[1])
+    < RELEASE.index(ubuntu_steps[2])
+)
+
+for token in (
+    'ipod-sync-ubuntu2604-amd64-$GITHUB_SHA',
+    '--name "ipod-sync-ubuntu2604-amd64-$GITHUB_SHA"',
+    'ci-ubuntu2604/PROVENANCE.json',
+    'ci-ubuntu2604',
+    'cmp \\\n',
+    'git get-tar-commit-id',
+    'sha256sum -c SHA256SUMS',
+    'open-ipod-sync-build-materials-v1',
+    'open-ipod-sync-provenance-v1',
+    'ubuntu-26.04-snapshot-20261015T000000Z',
+    'python3 tools/privacy-scan.py "$bundle"',
+    'gh attestation verify "$subject"',
+    '--source-ref',
+    '--source-digest',
+    '--signer-workflow',
+    '--deny-self-hosted-runners',
+):
+    assert token in RELEASE, token
+
+print("Ubuntu release input verification contract: PASS")
+
 print("dual-platform release CI gate contract: PASS")
 
 print("consumer verification documentation: PASS")
