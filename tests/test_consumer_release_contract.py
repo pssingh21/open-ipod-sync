@@ -305,6 +305,75 @@ for forbidden in ('fully hermetic build', 'fully-hermetic build'):
 
 import re
 
+# PROTECTED_IMMUTABLE_POLICY_CONTRACT
+preflight_job = RELEASE.split(
+    "  preflight:", 1
+)[1].split("  publish:", 1)[0]
+
+publish_job = RELEASE.split(
+    "  publish:", 1
+)[1].split("  verify:", 1)[0]
+
+assert "immutable-releases" not in preflight_job
+
+# Enforce the exact protected environment declaration.
+# Split into lines to avoid escaped-newline mismatches.
+publish_lines = publish_job.splitlines()
+
+environment_heading = "    environment:"
+environment_name = "      name: release"
+
+assert publish_lines.count(environment_heading) == 1, (
+    "Protected release environment declaration missing or duplicated"
+)
+
+environment_index = publish_lines.index(environment_heading)
+
+assert (
+    environment_index + 1 < len(publish_lines)
+    and publish_lines[environment_index + 1] == environment_name
+), "Publication job must use the protected release environment"
+
+
+policy_heading = (
+    "      - name: Verify protected immutable release policy"
+)
+next_heading = (
+    "      - name: Revalidate publication boundary"
+)
+
+assert publish_job.count(policy_heading) == 1
+assert publish_job.count(next_heading) == 1
+
+policy = publish_job.split(
+    policy_heading, 1
+)[1].split(next_heading, 1)[0]
+
+for token in (
+    "GH_TOKEN: ${{ secrets.RELEASE_POLICY_READ_TOKEN }}",
+    '[[ -z "${GH_TOKEN:-}" ]]',
+    'set -euo pipefail',
+    'gh api',
+    'repos/$GITHUB_REPOSITORY/immutable-releases',
+    "--jq '.enabled'",
+    '[[ "$IMMUTABLE" == "true" ]]',
+    "Protected immutable release policy: PASS",
+):
+    assert token in policy, token
+
+assert (
+    publish_job.index(policy_heading)
+    < publish_job.index(next_heading)
+    < publish_job.index("Create and push annotated tag")
+    < publish_job.index("Publish prerelease")
+)
+
+assert RELEASE.count(
+    "repos/$GITHUB_REPOSITORY/immutable-releases"
+) == 1
+
+print("Protected immutable release policy contract: PASS")
+
 # EXECUTABLE_RELEASE_IDENTITY_CONTRACT
 import subprocess
 import sys
