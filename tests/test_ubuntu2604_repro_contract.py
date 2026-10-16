@@ -241,4 +241,61 @@ for token in (
 ):
     require(candidate, token)
 
+# UBUNTU_ATTESTATION_CONTRACT
+attest = job_section(ci, "attest-ubuntu2604")
+
+for token in (
+    "github.event_name == 'push'",
+    "github.ref == 'refs/heads/main'",
+    "- ubuntu-host-compatibility",
+    "- ubuntu2604-reproducibility-check",
+    "id-token: write",
+    "attestations: write",
+    "artifact-metadata: write",
+    "persist-credentials: false",
+    "Download verified pinned Ubuntu bundle",
+    "Verify Ubuntu pinned supply-chain bundle",
+    "Scan Ubuntu attestation privacy boundary",
+    "Attest verified Ubuntu pinned bundle",
+    "Independently verify Ubuntu GitHub attestations",
+    "sha256sum -c SHA256SUMS",
+    "git get-tar-commit-id",
+    "python3 tools/privacy-scan.py attested-ubuntu",
+    "name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}",
+    "attested-ubuntu/*.deb",
+    "attested-ubuntu/*.spdx.json",
+    "attested-ubuntu/PROVENANCE.json",
+    "attested-ubuntu/BUILD-MATERIALS.json",
+    "attested-ubuntu/TOOLCHAIN.json",
+    "attested-ubuntu/open-ipod-sync-*-source.tar",
+    "attested-ubuntu/SHA256SUMS",
+    "gh attestation verify",
+    "--source-ref",
+    "--source-digest",
+    "--signer-workflow",
+    "--deny-self-hosted-runners",
+):
+    require(attest, token)
+
+assert attest.index(
+    "Verify Ubuntu pinned supply-chain bundle"
+) < attest.index(
+    "Scan Ubuntu attestation privacy boundary"
+) < attest.index(
+    "Attest verified Ubuntu pinned bundle"
+) < attest.index(
+    "Independently verify Ubuntu GitHub attestations"
+)
+
+assert attest.count("uses: actions/attest@") == 1
+assert attest.count("uses: actions/download-artifact@") == 1
+assert "uses: actions/upload-artifact@" not in attest
+assert "gh release create" not in attest
+assert "pull_request_target:" not in ci
+
+# Preserve the original Debian attestation channel.
+debian_attest = job_section(ci, "attest-supply-chain")
+require(debian_attest, "ipod-sync-debian11-amd64-")
+require(debian_attest, "uses: actions/attest@")
+
 print("Ubuntu reproducibility workflow contract: PASS")
