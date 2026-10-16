@@ -560,6 +560,15 @@ echo "$SHLIB_DEPENDS"
 
 rm -rf "$SHLIBDEPS_ROOT"
 
+# Debian uses safe system ifuse; Ubuntu uses bundled 1.2.1.
+IFUSE_RUNTIME_DEP="ifuse, "
+IFUSE_PACKAGE_POLICY="system"
+
+if [[ "$BUNDLE_IFUSE" == 1 ]]; then
+  IFUSE_RUNTIME_DEP="fuse3, "
+  IFUSE_PACKAGE_POLICY="bundled-1.2.1"
+fi
+
 cat > "$BUILD/DEBIAN/control" <<CONTROL
 Package: ipod-sync
 Version: $VER
@@ -567,7 +576,8 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: ipod-sync project
-Depends: python3, ifuse, libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, $SHLIB_DEPENDS, libusb-1.0-0
+X-Ipod-Sync-Ifuse-Policy: $IFUSE_PACKAGE_POLICY
+Depends: python3, ${IFUSE_RUNTIME_DEP}libimobiledevice-utils, usbmuxd, ffmpeg, gcc, pkg-config, libglib2.0-dev, util-linux, $SHLIB_DEPENDS, libusb-1.0-0
 Description: Experimental ADD-only music sync for legacy iPod touch devices
  Streams music from a dedicated kernel-read-only source mount to a legacy iPod,
  commits Apple music databases inside an iTunes-style sync envelope, and
