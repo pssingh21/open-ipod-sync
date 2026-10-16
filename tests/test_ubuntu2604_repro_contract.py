@@ -228,4 +228,39 @@ for forbidden in (
 ):
     assert forbidden not in pinned_matrix
 
+# PINNED_CANDIDATE_CONTRACT
+candidate = (
+    ROOT / "tools/prepare-ubuntu2604-pinned-candidate.sh"
+).read_text()
+
+require(
+    ubuntu,
+    "Prepare verified pinned Ubuntu candidate",
+)
+require(
+    ubuntu,
+    "bash tools/prepare-ubuntu2604-pinned-candidate.sh",
+)
+
+assert ubuntu.index(
+    "Run pinned Ubuntu 26.04 A/B matrix"
+) < ubuntu.index(
+    "Prepare verified pinned Ubuntu candidate"
+)
+
+for token in (
+    "sha256sum -c SHA256SUMS",
+    "cmp -s",
+    "builder-a.json",
+    "builder-b.json",
+    "toolchain-a.json",
+    "toolchain-b.json",
+    "BUILD-MATERIALS.json",
+    "TOOLCHAIN.json",
+    "source_date_epoch",
+    "python3 tools/privacy-scan.py",
+    "VERIFIED PINNED CANDIDATE",
+):
+    require(candidate, token)
+
 print("Ubuntu reproducibility workflow contract: PASS")

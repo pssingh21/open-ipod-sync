@@ -1468,6 +1468,12 @@ jobs:
           set -euo pipefail
           bash tools/test-ubuntu2604-pinned-matrix.sh
 
+      - name: Prepare verified pinned Ubuntu candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/prepare-ubuntu2604-pinned-candidate.sh
+
       - name: Install Ubuntu build dependencies
         shell: bash
         run: |
