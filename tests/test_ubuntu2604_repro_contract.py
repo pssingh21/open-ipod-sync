@@ -155,8 +155,35 @@ assert (
     in pinned_script
 )
 assert "20261015T000000Z" in pinned_script
-assert "Snapshot: ${snapshot}" in pinned_script
+
 assert "resolute-security" in pinned_script
 assert "snapshot[.]ubuntu[.]com" in pinned_script
+
+
+# Snapshot verification must not silently fall back to
+# current Ubuntu repositories or ignore failed indexes.
+pinned_script = (
+    ROOT / "tools/verify-ubuntu2604-pinned-inputs.sh"
+).read_text()
+
+for required in (
+    "docker.io/library/ubuntu@sha256:",
+    "20261015T000000Z",
+    "URIs: https://snapshot.ubuntu.com/ubuntu/${snapshot}",
+    "Acquire::https::CaInfo=",
+    "APT::Update::Error-Mode=any",
+    "ubuntu-archive-keyring.gpg",
+    "resolute-security",
+    "InRelease",
+    "apt-cache policy",
+    "sha256sum",
+):
+    require(pinned_script, required)
+
+assert "Acquire::https::Verify-Peer=false" not in pinned_script
+assert "Acquire::https::Verify-Host=false" not in pinned_script
+assert "trusted=yes" not in pinned_script
+assert "allow-unauthenticated" not in pinned_script
+assert "Snapshot: ${snapshot}" not in pinned_script
 
 print("Ubuntu reproducibility workflow contract: PASS")
