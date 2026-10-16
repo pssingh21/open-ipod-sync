@@ -4,6 +4,42 @@ All notable public changes to `open-ipod-sync` will be documented here.
 
 ## Unreleased
 
+## 0.2.0-alpha.9 — 2026-10-16
+
+Ubuntu 26.04 bundled-ifuse safety and installation update.
+
+### Packaging
+- Bundle pinned upstream `ifuse` 1.2.1 privately in the Ubuntu
+  26.04 amd64 package, built from corresponding upstream source.
+- Select the private executable automatically; users installing
+  the Ubuntu release `.deb` no longer need manual `ifuse`
+  remediation through `prepare-host.sh`.
+- Replace the Ubuntu package's system-`ifuse` dependency with
+  `fuse3` and generated ELF runtime dependencies.
+- Preserve Debian 11 system-ifuse packaging behavior.
+
+### Security
+- Embed mandatory bundled-ifuse policy independently in the
+  Bash launcher and Python runtime.
+- Refuse missing, invalid, or unexpected private executable
+  and policy-marker states rather than falling back to
+  system `ifuse`.
+- Audit private executable version, permissions, ELF hardening,
+  dynamic linkage, licensing notice, and package policy.
+- Add regression tests for unsafe executable overrides,
+  missing policy markers, and tampered package policy.
+
+### Verification
+- Extend Ubuntu package lifecycle tests to validate private
+  `ifuse` selection without host preparation.
+- Retain independent Debian and Ubuntu reproducibility,
+  supply-chain attestation, privacy, and release-verification gates.
+- Preserve the strict read-only music-source boundary,
+  ADD-only synchronization semantics, and explicit `--apply`
+  authorization for device writes.
+- No live device-write validation is claimed for the
+  alpha.9 release artifact itself.
+
 ## 0.2.0-alpha.8 — 2026-10-16
 
 First dual-platform Debian 11 and Ubuntu 26.04 amd64 package release.

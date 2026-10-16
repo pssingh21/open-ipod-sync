@@ -16,7 +16,7 @@ The synchronization model is currently **incremental ADD-only**.
 ## Current release
 
 ```text
-0.2.0-alpha.8
+0.2.0-alpha.9
 ```
 
 This software is **experimental**.
@@ -31,7 +31,7 @@ The generic incremental ADD path has been live-tested end-to-end during developm
 - post-commit database validation;
 - physical playback on the iPod.
 
-A fresh live ADD transaction has not yet been performed with the exact `0.2.0-alpha.8` release artifact itself. Treat this release as an alpha.
+A fresh live ADD transaction has not yet been performed with the exact `0.2.0-alpha.9` release artifact itself. Treat this release as an alpha.
 
 ## Validated platform
 
@@ -69,16 +69,39 @@ Download the Debian package for the release you want to use.
 For Debian 11 amd64:
 
 ```bash
-sudo apt install ./ipod-sync_0.2.0.alpha8_amd64.deb
+sudo apt install ./ipod-sync_0.2.0.alpha9_amd64.deb
 ```
 
 For Ubuntu 26.04 amd64, use its separately built package:
 
 ```bash
-sudo apt install ./ipod-sync-ubuntu2604_0.2.0.alpha8_amd64.deb
+sudo apt install ./ipod-sync-ubuntu2604_0.2.0.alpha9_amd64.deb
 ```
 
-On Ubuntu 26.04, verify that the active `ifuse` runtime is safe before connecting or mounting an iPod. The known-unsafe upstream `ifuse` 1.2.0 is rejected; use the project's documented host preparation procedure for the pinned 1.2.1 runtime.
+**Ubuntu 26.04 alpha.9:** The release `.deb` bundles
+the pinned, safe upstream `ifuse` 1.2.1 executable under
+`/usr/lib/ipod-sync/bin/ifuse`.
+
+`ipod-sync` uses this private executable automatically for iPod
+mounting, diagnostics, and recovery. **You do not need to run
+`prepare-host.sh` or manually compile or install `ifuse` 1.2.1**
+when installing the Ubuntu 26.04 release package.
+
+The package depends on `fuse3`, not the unsafe distribution `ifuse`
+package. An older system `ifuse` may still be installed, but the
+Ubuntu release package never falls back to it. Missing or invalid
+bundled-runtime components cause a fail-closed refusal.
+
+Verify the bundled runtime with:
+
+```bash
+/usr/lib/ipod-sync/bin/ifuse --version
+```
+
+Expected output: `ifuse 1.2.1`.
+
+Then continue with `ipod-sync mount-ro` and `ipod-sync doctor`.
+Keep the music source mounted strictly read-only.
 
 Verify the installation:
 
@@ -320,7 +343,18 @@ At the time this guard was introduced, Ubuntu 26.04 (Resolute) provides
 `ifuse` `1.2.0-2` from the Ubuntu archive. Ubuntu 24.04 uses the older
 1.1.4 line and is not affected by this specific regression.
 
-Check the active version before mounting an iPod:
+For the Ubuntu 26.04 alpha.9 release package, verify its
+**packaged** executable:
+
+```bash
+/usr/lib/ipod-sync/bin/ifuse --version
+```
+
+The system-wide `ifuse --version` is not authoritative for this
+package because `ipod-sync` selects its private executable.
+
+For a source checkout or an older package that relies on system
+`ifuse`, check the active system version before mounting an iPod:
 
 ```bash
 command -v ifuse
@@ -784,7 +818,7 @@ Post-gate builds on `main` produce GitHub/Sigstore-backed attestations.
 SLSA build provenance can be verified with:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha9_amd64.deb \
   --repo pssingh21/open-ipod-sync
 ```
 
@@ -793,7 +827,7 @@ The downloaded SPDX and provenance artifacts can be verified in the same way.
 The SPDX 2.3 attestation attached to the Debian package can be checked with:
 
 ```bash
-gh attestation verify ./ipod-sync_0.2.0.alpha6_amd64.deb \
+gh attestation verify ./ipod-sync_0.2.0.alpha9_amd64.deb \
   --repo pssingh21/open-ipod-sync \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
@@ -1513,7 +1547,7 @@ of its tagged source (or a verified compatible verifier version), use:
 
 ```bash
 REPO="pssingh21/open-ipod-sync"
-TAG="v0.2.0-alpha.8" # example future dual-platform release; confirm it exists
+TAG="v0.2.0-alpha.8" # previously published immutable dual-platform release
 DIR="$PWD/release-verify-$TAG"
 mkdir -p "$DIR"
 gh release download "$TAG" --repo "$REPO" --dir "$DIR"

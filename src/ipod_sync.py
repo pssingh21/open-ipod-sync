@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ipod-sync 0.2.0-alpha.8
+"""ipod-sync 0.2.0-alpha.9
 
 Experimental ADD-only music synchronization for legacy iPod touch devices.
 
@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any
 
 APP = "ipod-sync"
-VERSION = "0.2.0-alpha.8"
+VERSION = "0.2.0-alpha.9"
 
 HOME = Path.home()
 PROJECT = Path("/usr/lib/ipod-sync")
