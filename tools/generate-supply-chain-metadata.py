@@ -365,6 +365,24 @@ def extracted_artifacts(deb: Path) -> list[dict[str, str]]:
     return results
 
 
+def reproducibility_claim(build_environment: str) -> str:
+    # Only the pinned Debian 11 build currently has the
+    # independent reproducibility verification gate.
+    if build_environment == (
+        "debian-11-amd64-snapshot-20260830T235959Z"
+    ):
+        return (
+            "CI independently rebuilds and byte-compares "
+            "the Debian package and generated metadata."
+        )
+
+    # Fail closed for Ubuntu and other unverified environments.
+    return (
+        "Independent reproducibility verification has not been "
+        "established for this build environment."
+    )
+
+
 def make_provenance_document(
     *,
     package: str,
@@ -406,9 +424,8 @@ def make_provenance_document(
         "build": {
             "environment": build_environment,
             "builder": "open-ipod-sync/build-deb.sh",
-            "reproducibility_gate": (
-                "CI independently rebuilds and byte-compares "
-                "the Debian package and generated metadata."
+            "reproducibility_gate": reproducibility_claim(
+                build_environment
             ),
         },
         "bundled_libgpod": {

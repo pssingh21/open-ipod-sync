@@ -160,4 +160,32 @@ assert (
     == "ab" * 32
 )
 
+# Verified Debian provenance must retain its existing claim.
+assert (
+    "independently rebuilds and byte-compares"
+    in m.reproducibility_claim(
+        "debian-11-amd64-snapshot-20260830T235959Z"
+    )
+)
+
+assert (
+    provenance["build"]["reproducibility_gate"]
+    == m.reproducibility_claim(
+        "debian-11-amd64-snapshot-20260830T235959Z"
+    )
+)
+
+# Ubuntu must not claim a gate that has not been completed.
+ubuntu_claim = m.reproducibility_claim(
+    "ubuntu-26.04-amd64"
+)
+
+assert "not been established" in ubuntu_claim
+assert "independently rebuilds" not in ubuntu_claim
+
+# Unrecognized environments must also fail closed.
+assert "not been established" in m.reproducibility_claim(
+    "unknown-build-environment"
+)
+
 print("supply-chain metadata tests: PASS")
