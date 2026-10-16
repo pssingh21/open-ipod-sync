@@ -984,6 +984,14 @@ jobs:
             libusb-1.0-0-dev \
             file
 
+      - name: Install bundled ifuse build prerequisites
+        if: matrix.os == 'ubuntu-26.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool libfuse3-dev
+
       - name: Report library versions
         shell: bash
         run: |

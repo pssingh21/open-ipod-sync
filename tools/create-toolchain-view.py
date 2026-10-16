@@ -22,6 +22,13 @@ SYSTEM_PATH = (
 )
 
 ALLOWED_COMMANDS = (
+    "aclocal",
+    "autoconf",
+    "autoheader",
+    "autom4te",
+    "automake",
+    "autoreconf",
+    "libtoolize",
     "ar",
     "as",
     "awk",
