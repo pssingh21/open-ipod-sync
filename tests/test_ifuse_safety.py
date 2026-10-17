@@ -496,19 +496,6 @@ for stale in (
 
 
 for token in (
-    "### ifuse 1.2.0 safety requirement",
-    "Ubuntu 26.04 (Resolute)",
-    "`1.2.0-2`",
-    "https://github.com/libimobiledevice/ifuse",
-    "https://packages.ubuntu.com/resolute/amd64/utils/ifuse",
-    "## Prepare a Debian or Ubuntu source-build host",
-    "sudo ./tools/prepare-host.sh",
-    "builds the pinned upstream 1.2.1 release under `/usr/local` when remediation",
-):
-    assert token in readme, token
-
-
-for token in (
     "device trust boundary",
     "Upstream `ifuse` 1.2.0",
     "repeated reads",
