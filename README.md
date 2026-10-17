@@ -1,8 +1,15 @@
 # open-ipod-sync
 
-`open-ipod-sync` is an experimental Linux tool for safely synchronizing music to legacy iPod touch devices.
+`open-ipod-sync` is an open-source Linux command-line tool
+for safely synchronizing music to legacy Apple iPod touch devices
+without iTunes.
 
-The project is intentionally conservative. It is designed around:
+Designed for Debian and Ubuntu, it supports incremental
+music synchronization, read-only NAS music libraries,
+WMA-to-MP3 conversion, dry-run planning, controlled
+device writes and rollback to last clean state.
+
+The project is designed around:
 
 - a kernel-mounted, read-only music source;
 - a normally read-only iPod mount;
@@ -19,8 +26,6 @@ The synchronization model is currently **incremental ADD-only**.
 0.2.0-alpha.9
 ```
 
-This software is **experimental**.
-
 The generic incremental ADD path has been live-tested end-to-end during development, including:
 
 - new-track detection;
@@ -31,19 +36,16 @@ The generic incremental ADD path has been live-tested end-to-end during developm
 - post-commit database validation;
 - physical playback on the iPod.
 
-A fresh live ADD transaction has not yet been performed with the exact `0.2.0-alpha.9` release artifact itself. Treat this release as an alpha.
 
 ## Validated platform
 
 Real-device validation currently covers:
 
-- Debian 11 amd64
+- Ubuntu 26.04 amd64 and Debian 11 amd64
 - iPod touch 2nd generation
 - iOS 4.2.1
 
 Other Linux distributions and Apple devices remain experimental.
-
-CI also exercises supported source/build paths on newer environments, but that is not the same as real-device validation.
 
 Binary Debian packages are tied to the ABI and library environment against which they were built. If your system differs significantly from the validated environment, building the package from source is recommended.
 
@@ -169,20 +171,6 @@ For Ubuntu 26.04 amd64, use its separately built package:
 ```bash
 sudo apt install ./ipod-sync-ubuntu2604_0.2.0.alpha9_amd64.deb
 ```
-
-**Ubuntu 26.04 alpha.9:** The release `.deb` bundles
-the pinned, safe upstream `ifuse` 1.2.1 executable under
-`/usr/lib/ipod-sync/bin/ifuse`.
-
-`ipod-sync` uses this private executable automatically for iPod
-mounting, diagnostics, and recovery. **You do not need to run
-`prepare-host.sh` or manually compile or install `ifuse` 1.2.1**
-when installing the Ubuntu 26.04 release package.
-
-The package depends on `fuse3`, not the unsafe distribution `ifuse`
-package. An older system `ifuse` may still be installed, but the
-Ubuntu release package never falls back to it. Missing or invalid
-bundled-runtime components cause a fail-closed refusal.
 
 Verify the bundled runtime with:
 
@@ -421,74 +409,6 @@ ipod-sync mount-ro
 
 The tool uses `ifuse` and mounts the device at the configured `IPOD_SYNC_MOUNT`.
 
-
-### ifuse 1.2.0 safety requirement
-
-Do **not** use upstream `ifuse` 1.2.0 with `open-ipod-sync`.
-
-Upstream identifies 1.2.0 as having a serious data-corruption bug in its FUSE
-initialization behavior. The defect is fixed in `ifuse` 1.2.1.
-`open-ipod-sync` therefore refuses to mount through or trust a device mounted
-with `ifuse` 1.2.0.
-
-At the time this guard was introduced, Ubuntu 26.04 (Resolute) provides
-`ifuse` `1.2.0-2` from the Ubuntu archive. Ubuntu 24.04 uses the older
-1.1.4 line and is not affected by this specific regression.
-
-For the Ubuntu 26.04 alpha.9 release package, verify its
-**packaged** executable:
-
-```bash
-/usr/lib/ipod-sync/bin/ifuse --version
-```
-
-The system-wide `ifuse --version` is not authoritative for this
-package because `ipod-sync` selects its private executable.
-
-For a source checkout or an older package that relies on system
-`ifuse`, check the active system version before mounting an iPod:
-
-```bash
-command -v ifuse
-ifuse --version
-dpkg-query -W -f='${Version}\n' ifuse
-```
-
-If the active version is 1.2.0, do not run `plan` or `sync` through that mount.
-Unmount an existing iPod mount first:
-
-```bash
-ipod-sync unmount
-```
-
-Upstream references:
-
-- <https://github.com/libimobiledevice/ifuse>
-- <https://github.com/libimobiledevice/ifuse/releases/tag/1.2.1>
-
-Ubuntu 26.04 package reference:
-
-- <https://packages.ubuntu.com/resolute/amd64/utils/ifuse>
-
-Verify it with:
-
-```bash
-findmnt "$HOME/ipod"
-```
-
-or simply run:
-
-```bash
-ipod-sync doctor
-```
-
-When finished, unmount it with:
-
-```bash
-ipod-sync unmount
-```
-
----
 
 # Check the environment
 
@@ -809,6 +729,49 @@ Failures are handled fail-closed.
 
 ---
 
+# Architecture
+
+For implementation details, component boundaries, synchronization stages, transaction behavior, and trust boundaries, see:
+
+```text
+docs/ARCHITECTURE.md
+```
+
+For release construction, verification, publication, rollback, and operational procedures, see:
+
+```text
+docs/RELEASE-RUNBOOK.md
+```
+
+Keeping those details in dedicated documents avoids duplicating the same low-level material throughout the README.
+
+The README is intended to answer:
+
+> How do I safely install, configure, and use `open-ipod-sync`?
+
+The architecture and release documents answer the deeper implementation and maintainer questions.
+
+---
+
+# Development checks
+
+Before submitting a change, run:
+
+```bash
+./tools/public-sanity-check.sh
+```
+
+For release-related work, also follow:
+
+```text
+docs/RELEASE-RUNBOOK.md
+```
+
+Changes affecting synchronization safety should preserve the project's fail-closed transaction model and read-only source guarantees.
+
+---
+
+
 # Privacy, reproducibility, and release integrity
 
 `open-ipod-sync` is designed so public source and release artifacts can be independently inspected.
@@ -933,66 +896,6 @@ SHA256SUMS
 rather than being embedded into the tagged source tree.
 
 ---
-
-# Architecture
-
-For implementation details, component boundaries, synchronization stages, transaction behavior, and trust boundaries, see:
-
-```text
-docs/ARCHITECTURE.md
-```
-
-For release construction, verification, publication, rollback, and operational procedures, see:
-
-```text
-docs/RELEASE-RUNBOOK.md
-```
-
-Keeping those details in dedicated documents avoids duplicating the same low-level material throughout the README.
-
-The README is intended to answer:
-
-> How do I safely install, configure, and use `open-ipod-sync`?
-
-The architecture and release documents answer the deeper implementation and maintainer questions.
-
----
-
-# Development checks
-
-Before submitting a change, run:
-
-```bash
-./tools/public-sanity-check.sh
-```
-
-For release-related work, also follow:
-
-```text
-docs/RELEASE-RUNBOOK.md
-```
-
-Changes affecting synchronization safety should preserve the project's fail-closed transaction model and read-only source guarantees.
-
----
-
-# License
-
-This repository includes the GNU Lesser General Public License version 2.1 in:
-
-```text
-LICENSE
-```
-
-Third-party code retains its respective copyright and licensing terms.
-
-See:
-
-```text
-THIRD_PARTY.md
-```
-
-and the notices included with the corresponding source.
 
 ## Source and native-code security hardening
 
@@ -1736,3 +1639,21 @@ python3 tools/audit-repository-policy.py
 The repository-policy audit is independent of synchronization data and never
 accesses or modifies the configured music source, NAS content, or iPod.
 <!-- REPOSITORY_POLICY_END -->
+
+# License
+
+This repository includes the GNU Lesser General Public License version 2.1 in:
+
+```text
+LICENSE
+```
+
+Third-party code retains its respective copyright and licensing terms.
+
+See:
+
+```text
+THIRD_PARTY.md
+```
+
+and the notices included with the corresponding source.
