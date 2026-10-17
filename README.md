@@ -66,6 +66,98 @@ The normal workflow is:
 
 Download the Debian package for the release you want to use.
 
+### Download and verify a release package without cloning
+
+You can download the published `.deb` directly from the
+[GitHub alpha.9 release](https://github.com/pssingh21/open-ipod-sync/releases/tag/v0.2.0-alpha.9).
+**You do not need to clone the repository or build the package.**
+
+The commands below work on **Debian 11 amd64** and
+**Ubuntu 26.04 amd64**. They automatically select the correct
+distribution-specific package, download the published `SHA256SUMS`
+manifest, and verify the package before installation.
+
+Run these commands in a local directory outside your music source.
+If `wget` is unavailable, install it first with `sudo apt install wget`.
+
+```bash
+mkdir -p "$HOME/ipod-sync-downloads"
+cd "$HOME/ipod-sync-downloads"
+
+bash -euo pipefail <<'VERIFY_RELEASE'
+. /etc/os-release
+
+case "$ID:$VERSION_ID:$(dpkg --print-architecture)" in
+  debian:11:amd64)
+    PACKAGE="ipod-sync_0.2.0.alpha9_amd64.deb"
+    ;;
+  ubuntu:26.04:amd64)
+    PACKAGE="ipod-sync-ubuntu2604_0.2.0.alpha9_amd64.deb"
+    ;;
+  *)
+    echo "ERROR: unsupported distribution or architecture" >&2
+    exit 1
+    ;;
+esac
+
+BASE="https://github.com/pssingh21/open-ipod-sync/releases/download/v0.2.0-alpha.9"
+
+echo "===== DOWNLOAD PACKAGE ====="
+wget --https-only --tries=3   --output-document="$PACKAGE"   "$BASE/$PACKAGE"
+
+echo "===== DOWNLOAD SHA256 MANIFEST ====="
+wget --https-only --tries=3   --output-document=SHA256SUMS   "$BASE/SHA256SUMS"
+
+echo "===== SELECT EXACT PACKAGE CHECKSUM ====="
+awk -v name="$PACKAGE" '
+  $2 == name &&
+  length($1) == 64 &&
+  $1 !~ /[^0-9a-fA-F]/ {
+    print $1 "  " $2
+    found++
+  }
+  END {
+    if (found != 1) exit 1
+  }
+' SHA256SUMS > "$PACKAGE.expected-sha256"
+
+echo "===== VERIFY SHA256 ====="
+sha256sum --check --strict "$PACKAGE.expected-sha256"
+
+echo "SHA256 verification: PASS"
+echo "Verified package: $PWD/$PACKAGE"
+VERIFY_RELEASE
+```
+
+Expected output for the selected package:
+
+```text
+ipod-sync_0.2.0.alpha9_amd64.deb: OK
+```
+
+or:
+
+```text
+ipod-sync-ubuntu2604_0.2.0.alpha9_amd64.deb: OK
+```
+
+**Do not install the package unless verification reports `OK`.**
+A missing checksum entry, a duplicate entry, a download failure,
+or a checksum mismatch causes the procedure to stop.
+
+The published `SHA256SUMS` contains checksums for all fourteen-asset
+release contents other than the manifest itself. The commands above
+select exactly one package entry so the other release assets do not
+need to be downloaded.
+
+SHA-256 verification establishes consistency with the downloaded
+release manifest. For stronger authenticity and provenance checks,
+including GitHub attestations, see
+[Independently verify a release](#independently-verify-a-release).
+
+Once verification passes, install the appropriate package using
+the commands below from the same download directory.
+
 For Debian 11 amd64:
 
 ```bash
