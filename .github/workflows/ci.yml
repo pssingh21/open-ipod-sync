@@ -312,7 +312,7 @@ jobs:
           python3 tools/privacy-scan.py ci-artifact
 
       - name: Upload audited Debian package
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ipod-sync-debian11-amd64-${{ github.sha }}
           path: |
@@ -1480,7 +1480,7 @@ jobs:
           echo "Ubuntu pinned candidate upload gate: PASS"
 
       - name: Upload verified pinned Ubuntu package
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ipod-sync-ubuntu2604-amd64-${{ github.sha }}
           path: ${{ runner.temp }}/ubuntu2604-pinned-candidate/
